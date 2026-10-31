@@ -25,6 +25,9 @@ Verified on 2026-10-31. These are executed tests, not a proposed test plan.
 The test harness explicitly sets `skip_if_unavailable=0`: DNF4 otherwise may
 report a successful makecache command after skipping an invalid repository.
 The distributed repository configuration also fails closed in this way.
+DNF's installation subcommand requires root even with a disposable installroot;
+the GitHub-hosted Ubuntu test uses `sudo`, and local installation tests run as
+container root. Metadata-only consumption works without elevated privileges.
 
 The host is Fedora 44 and has no host `rpmsign`/`createrepo_c` installation;
 packaging verification was performed in a disposable Ubuntu 24.04 container

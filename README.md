@@ -220,12 +220,12 @@ uv run python scripts/sync.py \
   --repository "$(gh repo view --json nameWithOwner --jq .nameWithOwner)" \
   --dry-run --retain 1
 uv run python scripts/sync.py --validate-site site
-uv run python scripts/test_dnf.py --site site --install
+sudo "$(uv python find)" scripts/test_dnf.py --site site --install
 ```
 
 `--dry-run` downloads and verifies actual upstream assets and sources, creates a disposable passphrase-protected signing key, generates/validates the site, and marks the landing page **TEST ONLY**. **It never publishes.** Do not upload this output yourself. Each dry run has a fresh key and therefore deliberately cannot be byte-for-byte idempotent; production signing with a fixed key uses signed state to skip unchanged work. The generated directory is gitignored, and an existing unmarked directory is never overwritten.
 
-`test_dnf.py` uses file URLs only within the test, isolated install/cache/trust roots, `gpgcheck=1`, `repo_gpgcheck=1`, and no host RPM database. With `--install`, it actually installs the native package in a disposable root, runs `mkbrr version`, checks a no-op upgrade, and proves tampered metadata signatures are rejected. It requires native-architecture execution. It does not claim cross-architecture installation testing or a true old-to-new upgrade test.
+`test_dnf.py` uses file URLs only within the test, isolated install/cache/trust roots, `gpgcheck=1`, `repo_gpgcheck=1`, and no host RPM database. With `--install`, it actually installs the native package in a disposable root, runs `mkbrr version`, checks a no-op upgrade, and proves tampered metadata signatures are rejected. DNF requires root for installation even with an isolated installroot, hence `sudo` above; prefer the disposable container example if you do not want to run the test as host root. Omit `--install` for unprivileged metadata-only validation. It requires native-architecture execution. It does not claim cross-architecture installation testing or a true old-to-new upgrade test.
 
 Local production synchronization (do not paste private values into the command line or enable `set -x`):
 

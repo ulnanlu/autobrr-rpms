@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
           python3 scripts/sync.py --repository "$GITHUB_REPOSITORY" --dry-run --retain 1
           python3 scripts/sync.py --validate-site site
-          python3 scripts/test_dnf.py --site site --install
+          sudo python3 scripts/test_dnf.py --site site --install
       - name: Fedora DNF integration in a disposable container
         shell: bash
         run: |

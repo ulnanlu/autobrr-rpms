@@ -16,6 +16,12 @@ from pathlib import Path
 
 
 def exercise(site, install=False):
+    if install and os.geteuid() != 0:
+        raise RuntimeError(
+            "DNF requires root for installation, even into a disposable root. "
+            "Run this test with sudo (or inside a disposable rootful container), "
+            "or omit --install for unprivileged metadata validation."
+        )
     executable = shutil.which("dnf")
     if not executable:
         raise RuntimeError("DNF is required for consumer integration validation")
