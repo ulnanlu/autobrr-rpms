@@ -1,5 +1,10 @@
 # mkbrr RPM repository
 
+[![Validate](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/validate.yml)
+[![Publish](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/sync.yml/badge.svg?branch=main)](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/sync.yml)
+[![Upstream release](https://img.shields.io/github/v/release/autobrr/mkbrr?label=upstream)](https://github.com/autobrr/mkbrr/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Official [mkbrr release RPMs](https://github.com/autobrr/mkbrr/releases), checksum-verified and independently signed for DNF. **Unofficial; not affiliated with or endorsed by autobrr.** Packages are not rebuilt or patched.
 
 [Repository](https://ulnanlu.github.io/mkbrr-dnf-repo/) · [.repo file](https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo) · [Actions](https://github.com/ulnanlu/mkbrr-dnf-repo/actions)
