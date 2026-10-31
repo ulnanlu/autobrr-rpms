@@ -323,7 +323,7 @@ class Signer:
                 private and re.fullmatch(r"[A-F0-9]{40}", expected or ""),
                 "Missing signing configuration. Set RPM_SIGNING_KEY secret, "
                 "RPM_SIGNING_PASSPHRASE secret and RPM_SIGNING_FINGERPRINT variable; "
-                "commit config/signing-key.asc. See README.md#signing-key-setup",
+                "commit config/signing-key.asc. See docs/maintaining.md#signing-key-setup",
             )
             self.passfile.write_text(os.environ.get("RPM_SIGNING_PASSPHRASE", ""))
             self.passfile.chmod(0o600)

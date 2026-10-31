@@ -46,7 +46,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$RPM_SIGNING_KEY" || ! "$RPM_SIGNING_FINGERPRINT" =~ ^[A-Fa-f0-9]{40}$ || ! -s config/signing-key.asc ]]; then
-            echo '::error::Signing is not configured. Follow README.md#signing-key-setup: commit config/signing-key.asc, set RPM_SIGNING_KEY and RPM_SIGNING_PASSPHRASE secrets, and RPM_SIGNING_FINGERPRINT variable. No unsigned repository will be published.'
+            echo '::error::Signing is not configured. See docs/maintaining.md#signing-key-setup: commit config/signing-key.asc, set RPM_SIGNING_KEY and RPM_SIGNING_PASSPHRASE secrets, and RPM_SIGNING_FINGERPRINT variable. No unsigned repository will be published.'
             exit 1
           fi
       - name: Install packaging tools
