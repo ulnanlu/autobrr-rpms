@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+.ruff_cache/
+*.pyc
+site/
+.work/
+*.rpm
+*.key
+*.asc
+!config/signing-key.asc
+*.gpg
+*.secret
+.env

@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>mkbrr Unofficial Community RPM Repository</title>
+<style>
+body {{font: 18px/1.6 system-ui,sans-serif;max-width: 58rem;margin: 3rem auto;padding: 0 1rem}}
+pre,code {{background: #eee;color: #111;overflow-wrap: anywhere}} pre {{padding: 1rem;overflow-x: auto}}
+</style>
+<h1>mkbrr Unofficial Community RPM Repository</h1>
+<p><strong>{mode}Independent third-party repository. Not maintained or endorsed by the autobrr team.</strong>
+Official upstream RPMs are verified against upstream checksums, then independently signed.
+You are trusting this repository's signing key, not an upstream signing key.</p>
+<p>Repository: <a href="https://github.com/{repository}">{repository}</a> ·
+<a href="https://github.com/autobrr/mkbrr">Upstream</a> ·
+<a href="mkbrr-community.repo">Download .repo file</a> ·
+<a href="provenance.json">Provenance and original checksums</a> (<a href="provenance.json.asc">signature</a>)</p>
+<h2>Verify the key first</h2>
+<p>Compare this full fingerprint with the independently obtained fingerprint in the maintainer's
+GitHub repository variable/documentation or another trusted channel. This page alone is not independent verification.</p>
+<pre>{fingerprint}</pre>
+<pre>curl --fail --location --proto '=https' --proto-redir '=https' '{base_url}/RPM-GPG-KEY-mkbrr-community' -o /tmp/mkbrr-community.asc
+gpg --show-keys --with-fingerprint /tmp/mkbrr-community.asc
+# Only after independently comparing the full fingerprint:
+sudo rpmkeys --import /tmp/mkbrr-community.asc
+sudo dnf config-manager addrepo --from-repofile='{base_url}/mkbrr-community.repo'
+sudo dnf install mkbrr
+sudo dnf upgrade mkbrr</pre>
+<p>DNF4: use <code>sudo dnf config-manager --add-repo '{base_url}/mkbrr-community.repo'</code>.
+Portable alternative: download the .repo file to <code>/etc/yum.repos.d/mkbrr-community.repo</code> with sudo curl.
+Do not bypass package or metadata signature checks.</p>
+<h2>Published versions and corresponding source</h2>
+<p>The repository includes every upstream RPM architecture. DNF selects compatible packages.
+ARMv6 packages are not a promise of ARMv7/Fedora ARM compatibility.</p>
+{releases}
+<p>Matching source archives, upstream build scripts, GPL license, and Go dependency source archives
+are served here alongside binaries. See <a href="sources/README.txt">source instructions</a>.
+No mkbrr source is rebuilt or changed by this repository.</p>
+<h2>Remove the repository</h2>
+<pre>sudo rm /etc/yum.repos.d/mkbrr-community.repo
+sudo dnf clean all
+# Optional: sudo dnf remove mkbrr</pre>
+<p>For supported systems, key rotation, troubleshooting, and maintainer setup, see the
+<a href="https://github.com/{repository}#readme">README</a>.</p>
+</html>

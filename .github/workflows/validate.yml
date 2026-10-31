@@ -1,0 +1,51 @@
+name: Validate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends rpm createrepo-c gnupg dnf
+      - name: Syntax and unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m compileall -q scripts tests
+          python3 -m unittest discover -s tests -v
+      - name: Real upstream integration with a disposable passphrase-protected key
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/sync.py --repository "$GITHUB_REPOSITORY" --dry-run --retain 1
+          python3 scripts/sync.py --validate-site site
+          python3 scripts/test_dnf.py --site site --install
+      - name: Fedora DNF integration in a disposable container
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Only test containers use Docker; the repository needs no container/server.
+          docker run --rm -v "$PWD:/work:ro" -w /work registry.fedoraproject.org/fedora:44 \
+            bash -euo pipefail -c 'dnf -y install python3 rpm gnupg2; python3 scripts/test_dnf.py --site site --install'

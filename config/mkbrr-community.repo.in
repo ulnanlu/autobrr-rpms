@@ -1,0 +1,10 @@
+[mkbrr-community]
+name=mkbrr Unofficial Community RPM Repository
+baseurl={base_url}/rpm/stable/
+enabled=1
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey={base_url}/RPM-GPG-KEY-mkbrr-community
+sslverify=1
+metadata_expire=6h
+skip_if_unavailable=0
