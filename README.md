@@ -6,9 +6,15 @@ An independently maintained DNF/YUM repository that redistributes the **official
 
 ## Publication status and URLs
 
-This checkout is configured for [`ulnanlu/mkbrr-dnf-repo`](https://github.com/ulnanlu/mkbrr-dnf-repo). Its intended Pages URL is **https://ulnanlu.github.io/mkbrr-dnf-repo/** and the intended configuration URL is **https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo**.
+The live repository is published from [`ulnanlu/mkbrr-dnf-repo`](https://github.com/ulnanlu/mkbrr-dnf-repo) at **https://ulnanlu.github.io/mkbrr-dnf-repo/**. Download the configuration from **https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo**. The [first production deployment](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/runs/41166767778) and live HTTPS signature checks succeeded on 2026-10-31.
 
-**Production publication requires the maintainer's signing-key setup below. There is no production key or fingerprint in the initial checkout, and no unsigned or disposable-key repository will be deployed.** A successful Pages deployment in Actions, not the existence of this README, establishes that the repository is live. `config/signing-key.asc`, once added, is the public key and independent fingerprint reference; no production fingerprint is invented here.
+The production public key is pinned in [`config/signing-key.asc`](config/signing-key.asc). Its full fingerprint is:
+
+```text
+EB74 D9B8 1972 9F12 F360  B24E A07E 0E6D D4BB EF5C
+```
+
+For GitHub's `RPM_SIGNING_FINGERPRINT` variable, use the same fingerprint **without spaces**: `EB74D9B819729F12F360B24EA07E0E6DD4BBEF5C`. Independently verify this fingerprint before trusting the key. No unsigned or disposable-key repository is deployed; a successful Pages deployment in Actions establishes that the repository is live.
 
 When using this as a template under another account, all generated URLs come from `GITHUB_REPOSITORY` and the `actions/configure-pages` URL. No publishing code hardcodes an owner. For local commands use `gh repo view --json nameWithOwner --jq .nameWithOwner`. The examples below use the actual configured owner for convenience.
 
@@ -23,7 +29,7 @@ When using this as a template under another account, all generated URLs come fro
 
 ### 1. Verify and import the repository key
 
-Obtain the **full 40-hex fingerprint** through an independent trusted channel from the maintainer. Inspect the committed public key at [`config/signing-key.asc`](https://github.com/ulnanlu/mkbrr-dnf-repo/blob/main/config/signing-key.asc) once configured, preferably from a known-good checkout; a fingerprint downloaded from the same site as the key alone is not independent verification.
+Obtain the **full 40-hex fingerprint** through an independent trusted channel from the maintainer. Inspect the committed public key at [`config/signing-key.asc`](https://github.com/ulnanlu/mkbrr-dnf-repo/blob/main/config/signing-key.asc), preferably from a known-good checkout; a fingerprint downloaded from the same site as the key alone is not independent verification.
 
 ```bash
 curl --fail --location --proto '=https' --proto-redir '=https' \

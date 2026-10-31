@@ -47,12 +47,19 @@ unit fixtures; the application itself was never rebuilt.
 - Standalone public repository: <https://github.com/ulnanlu/mkbrr-dnf-repo>.
 - Pages configured via API with `build_type=workflow` and HTTPS enforced.
 - `github-pages` deployment environment permits only the `main` branch.
-- Production signing secrets, fingerprint variable and public key deliberately
-  remain unconfigured: they must come from the maintainer's trusted key setup.
-- **No production site has been deployed with the disposable key.** The first
-  production publication must wait for that one-time setup. An Actions signing
-  preflight failure in this initial state is intentional, not a reason to
-  disable signature verification.
+- The maintainer configured the production signing secrets and committed the
+  public key. The fingerprint variable was corrected to contain 40 contiguous
+  hexadecimal characters rather than GPG's space-grouped display format.
+- Production fingerprint: `EB74D9B819729F12F360B24EA07E0E6DD4BBEF5C`.
+- [First production publication](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/runs/41166767778)
+  succeeded on 2026-10-31, including signing, DNF consumption, artifact upload,
+  and deployment. **No disposable signing key was published.**
+- Live site: <https://ulnanlu.github.io/mkbrr-dnf-repo/>. Its index, `.repo`,
+  public key, metadata and detached signature, provenance and signed state were
+  downloaded successfully over HTTPS. All detached signatures were verified
+  against the committed production public key; a downloaded x86_64 RPM also
+  passed signed-checksum, RPM signature and integrity verification. The live
+  repository contains 9 RPMs across v1.27.0, v1.26.0 and v1.25.1.
 
 See [README.md](../README.md#signing-key-setup) for exact setup commands and the
 [validation workflow](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/validate.yml)
