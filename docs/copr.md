@@ -2,7 +2,18 @@
 
 The pilot packages **mkbrr** from unmodified upstream source for **Fedora 44 and 45, x86_64 and aarch64**. Fedora 44 bootstraps Go 1.27.3 from checksum-pinned source using the distribution's Go 1.26; Fedora 45 uses its distribution compiler. Both build offline. Other applications, ARMv6, and EPEL targets are not packaged yet.
 
-COPR publication requires your Fedora account/API credentials. GitHub authentication is separate. Until configured and a COPR build succeeds, Pages remains the live installation channel.
+Project: [ulnanlu/autobrr-community](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/). **mkbrr 1.27.0-2 is published on all four targets** ([build 11241270](https://copr.fedorainfracloud.org/coprs/build/11241270/)). Native builds/upstream tests and all four RPM signatures passed; DNF installation was verified on x86_64 for both Fedora releases. Pages remains available independently.
+
+## Install
+
+```bash
+sudo dnf copr enable ulnanlu/autobrr-community
+sudo dnf install mkbrr
+# If already installed:
+sudo dnf upgrade mkbrr
+```
+
+Verify COPR's project key fingerprint before trusting it: **`9DC7507E8E0F101F6F2D1D2C35B2DA8C228F2512`**. It is separate from the Pages key. Keep package signature checking enabled; only remove `/etc/yum.repos.d/mkbrr-community.repo` after verifying the replacement. The COPR plugin comes from `dnf5-plugins` or `dnf-plugins-core`.
 
 ## Activate
 
@@ -19,17 +30,6 @@ gh run watch RUN_ID --exit-status
 ```
 
 `init` authenticates your Fedora identity, creates `YOUR_FEDORA_USER/autobrr-community`, and validates its targets and disabled build networking. It stores `COPR_CONFIG` in GitHub's protected `copr` environment and sets `COPR_PROJECT` to the actual Fedora owner/project. Existing projects are checked, not overwritten. Keep the API token renewed before its expiry. For another GitHub repository, first create that environment and restrict it to the default branch; this repository is already configured.
-
-After a successful COPR build, inspect its project signing key and verify its fingerprint. COPR uses its own project key, **not** the existing Pages key. On a supported target:
-
-```bash
-sudo dnf copr enable YOUR_FEDORA_USER/autobrr-community
-sudo dnf install mkbrr
-# If mkbrr is already installed:
-sudo dnf upgrade mkbrr
-```
-
-Keep package signature checking enabled. The COPR plugin is supplied by `dnf5-plugins` or `dnf-plugins-core`, depending on the distribution. Only remove `/etc/yum.repos.d/mkbrr-community.repo` after verifying the replacement; this setup does not disable or modify Pages.
 
 ## Pipeline
 

@@ -5,11 +5,11 @@
 [![Upstream release](https://img.shields.io/github/v/release/autobrr/mkbrr?label=upstream)](https://github.com/autobrr/mkbrr/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Official [mkbrr release RPMs](https://github.com/autobrr/mkbrr/releases), checksum-verified and independently signed for DNF. **Unofficial; not affiliated with or endorsed by autobrr.** Packages are not rebuilt or patched.
+Pages mirrors official [mkbrr release RPMs](https://github.com/autobrr/mkbrr/releases), checksum-verified and independently signed without rebuilding or patching. **Unofficial; not affiliated with or endorsed by autobrr.**
 
 [Repository](https://ulnanlu.github.io/mkbrr-dnf-repo/) · [.repo file](https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo) · [Actions](https://github.com/ulnanlu/mkbrr-dnf-repo/actions)
 
-**COPR migration:** the [source-build pilot](docs/copr.md) targets mkbrr on Fedora 44/45, x86_64/aarch64. The Pages repository and installation commands below remain active during migration.
+**COPR is live:** [source-built mkbrr](docs/copr.md) for Fedora 44/45, x86_64/aarch64. Enable with `sudo dnf copr enable ulnanlu/autobrr-community`. Pages and the installation commands below remain active.
 
 ## Supported systems
 
