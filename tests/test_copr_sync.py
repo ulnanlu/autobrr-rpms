@@ -346,6 +346,7 @@ class CoprStateTests(unittest.TestCase):
             self.assertEqual(
                 client.project_proxy.add.call_args.args[:2], ("fedora-user", "autobrr-community")
             )
+            self.assertEqual(run.call_args_list[0].args[0][-2:], ["--env", "copr"])
             self.assertEqual(run.call_args_list[-1].args[0][-1], "fedora-user/autobrr-community")
 
 

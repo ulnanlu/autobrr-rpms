@@ -520,7 +520,7 @@ def initialize(config_path, github_repository=None):
     if github_repository:
         repo.base_url(github_repository)  # Validate OWNER/REPOSITORY before calling gh.
         repo.run(
-            ["gh", "secret", "set", "COPR_CONFIG", "--repo", github_repository],
+            ["gh", "secret", "set", "COPR_CONFIG", "--repo", github_repository, "--env", "copr"],
             input=Path(config_path).read_text(),
         )
         repo.run(

@@ -18,7 +18,7 @@ gh run list --workflow copr.yml --limit 5
 gh run watch RUN_ID --exit-status
 ```
 
-`init` authenticates your Fedora identity, creates `YOUR_FEDORA_USER/autobrr-community`, and validates its targets and disabled build networking. It uploads the API config as the `COPR_CONFIG` GitHub secret and sets `COPR_PROJECT` to the actual Fedora owner/project. Existing projects are checked, not overwritten. Keep the API token renewed before its expiry.
+`init` authenticates your Fedora identity, creates `YOUR_FEDORA_USER/autobrr-community`, and validates its targets and disabled build networking. It stores `COPR_CONFIG` in GitHub's protected `copr` environment and sets `COPR_PROJECT` to the actual Fedora owner/project. Existing projects are checked, not overwritten. Keep the API token renewed before its expiry. For another GitHub repository, first create that environment and restrict it to the default branch; this repository is already configured.
 
 After a successful COPR build, inspect its project signing key and verify its fingerprint. COPR uses its own project key, **not** the existing Pages key. On a supported target:
 
