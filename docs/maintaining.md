@@ -1,5 +1,7 @@
 # Maintenance
 
+For the source-built COPR pilot, see [copr.md](copr.md). This page covers the existing upstream-RPM Pages mirror.
+
 ## GitHub setup
 
 Use a standalone public repository, not an upstream fork, with `main` as the default branch. Enable **Settings → Pages → GitHub Actions** and allow `main` in the `github-pages` environment. Protect the branch and restrict write access. Workflows detect the owner and project URL automatically.
@@ -91,6 +93,6 @@ For local production sync, export `RPM_SIGNING_KEY`, `RPM_SIGNING_PASSPHRASE`, a
 
 ## Storage and licensing
 
-The site is capped at **800 MiB**, below Pages' 1 GiB limit. Check `du -sh site`, [Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits), bandwidth, and Actions quotas. If necessary, deliberately lower `--retain` to 1 or 2 in the workflow; do not omit required source or architectures to fit.
+The site is capped at **800 MiB**, below Pages' 1 GB limit. Check `du -sh site`, [Pages limits](https://docs.github.com/en/pages/getting-started-with-github-pages/github-pages-limits), bandwidth, and Actions quotas. If necessary, deliberately lower `--retain` to 1 or 2 in the workflow; do not omit required source or architectures to fit.
 
 Corresponding source archives, build scripts, and checksum-verified Go dependency sources accompany the RPMs under `sources/`, with commits and original/signed hashes in `provenance.json`. Preserve their licenses when redistributing. Source is offered alongside binaries under GPLv2's equivalent-access model, not a three-year written offer. Only repository automation is MIT-licensed.

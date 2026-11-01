@@ -1,0 +1,108 @@
+name: COPR source builds
+
+on:
+  schedule:
+    - cron: '47 5 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild even if this version/release already succeeded
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'config/copr.json'
+      - 'packaging/**'
+      - 'scripts/copr_sync.py'
+      - '.github/workflows/copr.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copr-publication
+  cancel-in-progress: false
+
+jobs:
+  source:
+    # The existing Pages repository remains independent until COPR is configured.
+    if: >-
+      github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
+      (vars.COPR_PROJECT != '' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 40
+    outputs:
+      changed: ${{ steps.prepare.outputs.changed }}
+    steps:
+      - name: Install source packaging tools
+        run: dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config copr-cli git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare source RPM when upstream changes
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COPR_PROJECT: ${{ vars.COPR_PROJECT }}
+          FORCE: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$COPR_PROJECT" ]]; then
+            echo '::error::Configure COPR_PROJECT and COPR_CONFIG using docs/copr.md first.'
+            exit 1
+          fi
+          args=(--check-copr "$COPR_PROJECT")
+          if [[ "$FORCE" == true ]]; then args+=(--force); fi
+          python3 scripts/copr_sync.py prepare "${args[@]}"
+      - name: Compile and test before submission
+        if: steps.prepare.outputs.changed == 'true'
+        run: |
+          python3 scripts/copr_sync.py build
+          python3 scripts/copr_sync.py test-install
+      - name: Upload source package
+        if: steps.prepare.outputs.changed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: copr-source
+          path: |
+            .work/copr/plan.json
+            .work/copr/SRPMS/*.src.rpm
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 7
+
+  submit:
+    needs: source
+    if: needs.source.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:45
+    environment: copr
+    timeout-minutes: 110
+    steps:
+      - name: Install COPR client
+        run: dnf -y install python3 copr-cli git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: copr-source
+          path: .work/copr
+      - name: Submit and wait for signed COPR builds
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+          COPR_PROJECT: ${{ vars.COPR_PROJECT }}
+          FORCE: ${{ inputs.force || false }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$COPR_CONFIG" ]]; then
+            echo '::error::COPR_CONFIG secret is missing. See docs/copr.md.'
+            exit 1
+          fi
+          args=(--target "$COPR_PROJECT")
+          if [[ "$FORCE" == true ]]; then args+=(--force); fi
+          python3 scripts/copr_sync.py submit "${args[@]}"

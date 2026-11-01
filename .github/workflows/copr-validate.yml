@@ -1,0 +1,55 @@
+name: Validate COPR packaging
+
+on:
+  pull_request:
+    paths:
+      - 'config/copr.json'
+      - 'packaging/**'
+      - 'scripts/copr_sync.py'
+      - 'tests/test_copr_sync.py'
+      - '.github/workflows/copr*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'config/copr.json'
+      - 'packaging/**'
+      - 'scripts/copr_sync.py'
+      - 'tests/test_copr_sync.py'
+      - '.github/workflows/copr*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: copr-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-build:
+    runs-on: ubuntu-24.04
+    container: registry.fedoraproject.org/fedora:45
+    timeout-minutes: 40
+    steps:
+      - name: Install source build tools
+        run: dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config git
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests -p test_copr_sync.py -v
+      - name: Prepare unmodified upstream source and vendored dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/copr_sync.py prepare
+      - name: Compile, run upstream tests, and install in a disposable root
+        run: |
+          python3 scripts/copr_sync.py build
+          python3 scripts/copr_sync.py test-install
+      - name: Upload tested source package
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tested-copr-srpm
+          path: .work/copr/SRPMS/*.src.rpm
+          if-no-files-found: error
+          retention-days: 7

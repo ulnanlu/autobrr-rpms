@@ -1,0 +1,13 @@
+{
+  "project": "autobrr-community",
+  "chroots": ["fedora-45-x86_64", "fedora-45-aarch64"],
+  "packages": {
+    "mkbrr": {
+      "upstream": "autobrr/mkbrr",
+      "module": "github.com/autobrr/mkbrr",
+      "release": 2,
+      "spec": "packaging/mkbrr.spec.in",
+      "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0"
+    }
+  }
+}

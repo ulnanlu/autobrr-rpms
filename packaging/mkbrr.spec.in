@@ -1,0 +1,58 @@
+%global debug_package %{nil}
+%global upstream_commit @COMMIT@
+%global source_sha256 @SOURCE_SHA256@
+%global vendor_sha256 @VENDOR_SHA256@
+
+Name:           mkbrr
+Version:        @VERSION@
+Release:        @RELEASE@%{?dist}
+Summary:        Create, inspect and modify BitTorrent files
+License:        @LICENSE@
+URL:            https://github.com/autobrr/mkbrr
+Source0:        https://codeload.github.com/autobrr/mkbrr/tar.gz/%{upstream_commit}#/mkbrr-%{upstream_commit}.tar.gz
+Source1:        mkbrr-%{version}-vendor.tar.gz
+Source2:        mkbrr-source-provenance.json
+
+BuildRequires:  golang >= @GO_VERSION@
+BuildRequires:  coreutils
+BuildRequires:  tar
+BuildRequires:  gzip
+ExclusiveArch:  x86_64 aarch64
+
+%description
+mkbrr creates, inspects and modifies .torrent files.
+This is an unofficial community build from unmodified upstream source.
+
+%prep
+printf '%s  %s\n' '%{source_sha256}' '%{SOURCE0}' | sha256sum --check --status
+printf '%s  %s\n' '%{vendor_sha256}' '%{SOURCE1}' | sha256sum --check --status
+%autosetup -n mkbrr-%{upstream_commit}
+tar -xzf %{SOURCE1}
+cp %{SOURCE2} source-provenance.json
+
+%build
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+export SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@
+go build -mod=vendor -trimpath -buildvcs=false -pgo=off \
+  -ldflags '-s -w -B gobuildid -X main.version=%{version} -X main.buildTime=@BUILD_TIME@' \
+  -o mkbrr .
+cp %{_licensedir}/golang/LICENSE GOLANG-LICENSE
+
+%install
+install -Dpm0755 mkbrr %{buildroot}%{_bindir}/mkbrr
+
+%check
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+go test -mod=vendor -short ./...
+./mkbrr version | grep -F 'mkbrr version: %{version}'
+
+%files
+%license LICENSE GOLANG-LICENSE vendor-licenses
+%doc README.md source-provenance.json
+%{_bindir}/mkbrr
+
+%changelog
+* @CHANGELOG_DATE@ Community RPM maintainers - %{version}-@RELEASE@
+- Build unmodified upstream source with vendored dependencies.
