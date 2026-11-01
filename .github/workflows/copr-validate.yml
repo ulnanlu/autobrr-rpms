@@ -27,9 +27,13 @@ concurrency:
 
 jobs:
   source-build:
+    strategy:
+      fail-fast: false
+      matrix:
+        fedora: ['44', '45']
     runs-on: ubuntu-24.04
-    container: registry.fedoraproject.org/fedora:45
-    timeout-minutes: 40
+    container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
+    timeout-minutes: 60
     steps:
       - name: Install source build tools
         run: dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config git
@@ -49,7 +53,7 @@ jobs:
       - name: Upload tested source package
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tested-copr-srpm
+          name: tested-copr-srpm-fedora-${{ matrix.fedora }}
           path: .work/copr/SRPMS/*.src.rpm
           if-no-files-found: error
           retention-days: 7

@@ -52,6 +52,12 @@ def settings(package="mkbrr"):
         all(re.fullmatch(r"fedora-\d+-(x86_64|aarch64)", c) for c in config["chroots"]),
         "Unreviewed COPR build target",
     )
+    toolchain = config["toolchain"]
+    repo.require(
+        all(re.fullmatch(r"\d+\.\d+\.\d+", toolchain[k]) for k in ("version", "bootstrap_version"))
+        and re.fullmatch(r"[a-f0-9]{64}", toolchain["sha256"]),
+        "Invalid reviewed Go source toolchain",
+    )
     spec = (ROOT / recipe["spec"]).resolve()
     repo.require(spec.is_relative_to(ROOT.resolve()) and spec.is_file(), "Invalid spec template")
     return config, recipe
@@ -290,6 +296,28 @@ def render_spec(recipe, plan):
     return text
 
 
+def toolchain_source(network, toolchain, plan, sources):
+    version = toolchain["version"]
+    repo.require(
+        tuple(map(int, version.split("."))) >= tuple(map(int, plan["go_version"].split("."))),
+        "Review the pinned Go source toolchain: upstream requires a newer compiler",
+    )
+    name = f"go{version}.src.tar.gz"
+    url = f"https://go.dev/dl/{name}"
+    archive = sources / name
+    network.download(url, archive, limit=64 * repo.MIB, hosts={"go.dev", "dl.google.com"})
+    repo.verify_checksum(archive, toolchain["sha256"])
+    plan.update(
+        {
+            "toolchain_version": version,
+            "bootstrap_version": toolchain["bootstrap_version"],
+            "toolchain_source_url": url,
+            "toolchain_file": name,
+            "toolchain_sha256": toolchain["sha256"],
+        }
+    )
+
+
 def prepare(package, output, check_copr=None, force=False, network=None):
     config, recipe = settings(package)
     network = network or repo.Network()
@@ -304,7 +332,11 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         plan, archive, source_dir = upstream_source(network, package, recipe, sources)
         plan["chroots"] = config["chroots"]
         plan["packaging_sha256"] = hashlib.sha256(
-            (repo.canonical(recipe) + (ROOT / recipe["spec"]).read_text()).encode()
+            (
+                repo.canonical(recipe)
+                + repo.canonical(config["toolchain"])
+                + (ROOT / recipe["spec"]).read_text()
+            ).encode()
         ).hexdigest()
         if check_copr:
             owner, project = target(check_copr)
@@ -322,6 +354,7 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         plan["vendor_sha256"] = repo.sha256(vendor)
         plan["source_file"] = archive.name
         plan["vendor_file"] = vendor.name
+        toolchain_source(network, config["toolchain"], plan, sources)
         # No generated binaries or dependency caches enter the source package.
         shutil.rmtree(sources / "unpacked")
         provenance = sources / f"{package}-source-provenance.json"

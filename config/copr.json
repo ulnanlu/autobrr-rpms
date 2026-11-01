@@ -1,6 +1,11 @@
 {
   "project": "autobrr-community",
-  "chroots": ["fedora-45-x86_64", "fedora-45-aarch64"],
+  "chroots": ["fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64"],
+  "toolchain": {
+    "version": "1.27.3",
+    "bootstrap_version": "1.26.0",
+    "sha256": "6e7749035cf360f06b2575d162ea79df9fda8ef671889e5c375f8e50777f26bb"
+  },
   "packages": {
     "mkbrr": {
       "upstream": "autobrr/mkbrr",

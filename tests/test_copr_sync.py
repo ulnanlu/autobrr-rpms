@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -13,7 +14,7 @@ from unittest.mock import Mock, patch
 from scripts import copr_sync as copr
 from scripts import sync as repo
 
-CHROOTS = ["fedora-45-x86_64", "fedora-45-aarch64"]
+CHROOTS = ["fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64"]
 COMMIT = "a" * 40
 
 
@@ -147,6 +148,9 @@ class SourceTests(unittest.TestCase):
             "release": 2,
             "commit": COMMIT,
             "go_version": "1.27.0",
+            "toolchain_version": "1.27.3",
+            "bootstrap_version": "1.26.0",
+            "toolchain_sha256": "d" * 64,
             "source_sha256": "b" * 64,
             "vendor_sha256": "c" * 64,
             "source_date_epoch": 1767225600,
@@ -161,6 +165,10 @@ class SourceTests(unittest.TestCase):
             "GOPROXY=off",
             "GOTOOLCHAIN=local",
             "golang >= 1.27.0",
+            "golang >= 1.26.0",
+            "https://go.dev/dl/go1.27.3.src.tar.gz",
+            "export GOROOT_BOOTSTRAP=",
+            "./make.bash",
             "sha256sum --check",
             "%license LICENSE GOLANG-LICENSE vendor-licenses",
         ):
@@ -168,6 +176,37 @@ class SourceTests(unittest.TestCase):
         self.assertNotIn("@VERSION@", spec)
         self.assertNotIn("curl ", spec)
         self.assertNotIn("wget ", spec)
+
+    def test_pinned_toolchain_source_and_provenance(self):
+        config, _ = copr.settings()
+        toolchain = {**config["toolchain"], "sha256": hashlib.sha256(b"fixture").hexdigest()}
+        network = Mock()
+        network.download.side_effect = lambda url, path, **kw: path.write_bytes(b"fixture")
+        with tempfile.TemporaryDirectory() as directory:
+            plan = {"go_version": "1.27.0"}
+            copr.toolchain_source(network, toolchain, plan, Path(directory))
+            self.assertEqual(plan["toolchain_version"], toolchain["version"])
+            self.assertEqual(plan["toolchain_sha256"], toolchain["sha256"])
+            self.assertTrue(plan["toolchain_file"].endswith(".src.tar.gz"))
+            self.assertEqual(
+                network.download.call_args.kwargs["hosts"], {"go.dev", "dl.google.com"}
+            )
+
+    def test_toolchain_checksum_mismatch_or_newer_requirement_fails_closed(self):
+        config, _ = copr.settings()
+        network = Mock()
+        network.download.side_effect = lambda url, path, **kw: path.write_bytes(b"corrupted")
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(repo.InvalidRepository):
+                copr.toolchain_source(
+                    network, config["toolchain"], {"go_version": "1.27.0"}, Path(directory)
+                )
+            network.reset_mock()
+            with self.assertRaisesRegex(repo.InvalidRepository, "newer compiler"):
+                copr.toolchain_source(
+                    network, config["toolchain"], {"go_version": "1.28.0"}, Path(directory)
+                )
+            network.download.assert_not_called()
 
     def test_existing_unrelated_output_preserved(self):
         with tempfile.TemporaryDirectory() as directory:

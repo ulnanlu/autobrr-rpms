@@ -9,7 +9,7 @@ Official [mkbrr release RPMs](https://github.com/autobrr/mkbrr/releases), checks
 
 [Repository](https://ulnanlu.github.io/mkbrr-dnf-repo/) · [.repo file](https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo) · [Actions](https://github.com/ulnanlu/mkbrr-dnf-repo/actions)
 
-**COPR migration:** a [source-build pilot](docs/copr.md) is implemented for mkbrr on Fedora 45. It requires COPR account setup before publication. The Pages repository and installation commands below remain active.
+**COPR migration:** the [source-build pilot](docs/copr.md) targets mkbrr on Fedora 44/45, x86_64/aarch64. The Pages repository and installation commands below remain active during migration.
 
 ## Supported systems
 

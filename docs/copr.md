@@ -1,6 +1,6 @@
 # COPR source-build pilot
 
-The pilot packages **mkbrr** from unmodified upstream source for **Fedora 45 x86_64 and aarch64**. Fedora 45 supplies its required Go 1.27 compiler. Fedora 44 has Go 1.26; it and ARMv6 users should continue using the existing Pages repository. Other applications and EPEL targets are not packaged yet.
+The pilot packages **mkbrr** from unmodified upstream source for **Fedora 44 and 45, x86_64 and aarch64**. Fedora 44 bootstraps Go 1.27.3 from checksum-pinned source using the distribution's Go 1.26; Fedora 45 uses its distribution compiler. Both build offline. Other applications, ARMv6, and EPEL targets are not packaged yet.
 
 COPR publication requires your Fedora account/API credentials. GitHub authentication is separate. Until configured and a COPR build succeeds, Pages remains the live installation channel.
 
@@ -39,9 +39,10 @@ Keep package signature checking enabled. The COPR plugin is supplied by `dnf5-pl
 - Run `go mod vendor` with Go's checksum database enabled. Reject changes to upstream `go.mod`/`go.sum`.
 - Put dependency source, license notices, checksums, and provenance into an SRPM.
 - Compile locally, run upstream short tests, and test-install in a disposable root.
-- Upload the SRPM to COPR and wait for both architecture builds to succeed. COPR signs and hosts the resulting RPMs.
+- Include checksum-pinned Go source for Fedora 44's compiler bootstrap; never lower upstream's Go requirement.
+- Upload the SRPM to COPR and wait for all four targets to succeed. COPR signs and hosts the resulting RPMs.
 
-The RPM build runs with network access disabled, `GOTOOLCHAIN=local`, and `GOPROXY=off`; no upstream application binaries are downloaded. Dependency resolution happens before the offline build. All source archives are included in the SRPM; source and vendor checksums are rechecked during `%prep`. The optional upstream PGO profile is not used.
+The RPM build runs with network access disabled, `GOTOOLCHAIN=local`, and `GOPROXY=off`; no upstream application or compiler binaries are downloaded during the build. Dependency resolution happens beforehand. All source archives are included in the SRPM and rechecked during `%prep`. Go source version/checksum pins live in `config/copr.json`; newer upstream compiler requirements fail closed until reviewed. The optional upstream PGO profile is not used.
 
 Successful version/release/target combinations are skipped. In-flight builds are watched rather than duplicated; failed builds can be retried. Bump `release` in `config/copr.json` for packaging changes to an existing version. Release 2 supersedes the upstream RPM's release 1 without an Epoch change. Review bundled licenses when updating recipes; the upstream README grants GPL-2.0-or-later, and dependency notices are installed with the package.
 
@@ -49,10 +50,10 @@ The secret is available only in the default-branch submission job, which uses an
 
 ## Local verification
 
-Use the same environment as the pilot, without installing build tools on the host:
+Use either target release without installing build tools on the host:
 
 ```bash
-podman run --rm -it -v "$PWD:/work:Z" -w /work registry.fedoraproject.org/fedora:45 bash
+podman run --rm -it -v "$PWD:/work:Z" -w /work registry.fedoraproject.org/fedora:44 bash
 dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config git
 python3 -m unittest discover -s tests -p test_copr_sync.py -v
 python3 scripts/copr_sync.py prepare
@@ -60,6 +61,6 @@ python3 scripts/copr_sync.py build
 python3 scripts/copr_sync.py test-install
 ```
 
-These commands build an **unsigned local RPM**, not a published COPR package. `test-install` signs a temporary copy with a disposable key, verifies it, and uses an isolated RPM database/installroot; it never disables signature checks. Artifacts under `.work/copr/` are gitignored. `copr-validate.yml` repeats the source build without credentials.
+These commands build an **unsigned local RPM**, not a published COPR package. `test-install` signs a temporary copy with a disposable key, verifies it, and uses an isolated RPM database/installroot; it never disables signature checks. Artifacts under `.work/copr/` are gitignored. `copr-validate.yml` tests both Fedora releases without credentials; COPR builds both architectures natively.
 
 To submit locally after activation, install `copr-cli` or use `uv run --with copr`, then run `python scripts/copr_sync.py submit --target YOUR_FEDORA_USER/autobrr-community`. COPR controls build availability and retention; it is not unlimited storage. Applications with missing redistribution licenses remain excluded.
