@@ -1,89 +1,50 @@
-# mkbrr RPM repository
+# autobrr RPMs
 
-[![Validate](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/validate.yml/badge.svg?branch=main)](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/validate.yml)
-[![Publish](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/sync.yml/badge.svg?branch=main)](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/sync.yml)
-[![Upstream release](https://img.shields.io/github/v/release/autobrr/mkbrr?label=upstream)](https://github.com/autobrr/mkbrr/releases/latest)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+Unofficial, source-built Fedora packages for [autobrr](https://github.com/autobrr). **Not affiliated with or endorsed by upstream.**
 
-Pages mirrors official [mkbrr release RPMs](https://github.com/autobrr/mkbrr/releases), checksum-verified and independently signed without rebuilding or patching. **Unofficial; not affiliated with or endorsed by autobrr.**
+[COPR repository](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/) · [Packaging CI](https://github.com/ulnanlu/autobrr-rpms/actions/workflows/copr-validate.yml) · [Maintenance](docs/maintaining.md)
 
-[Repository](https://ulnanlu.github.io/mkbrr-dnf-repo/) · [.repo file](https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo) · [Actions](https://github.com/ulnanlu/mkbrr-dnf-repo/actions)
+| Package | COPR build |
+| --- | --- |
+| [autobrr](https://github.com/autobrr/autobrr) | [![autobrr build](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/autobrr/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/autobrr/) |
+| [mkbrr](https://github.com/autobrr/mkbrr) | [![mkbrr build](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/mkbrr/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/mkbrr/) |
+| [qui](https://github.com/autobrr/qui) | [![qui build](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/qui/status_image/last_build.png)](https://copr.fedorainfracloud.org/coprs/ulnanlu/autobrr-community/package/qui/) |
 
-**COPR is live:** [source-built mkbrr](docs/copr.md) for Fedora 44/45, x86_64/aarch64. Enable with `sudo dnf copr enable ulnanlu/autobrr-community`. Pages and the installation commands below remain active.
-
-## Supported systems
-
-Fedora and compatible DNF-based distributions. Architectures: **x86_64**, **aarch64**, **armv6hl**. ARMv6 requires distribution support; it is not a native ARMv7 build. Installation is tested on x86_64 with DNF4 and DNF5; ARM packages are integrity/signature-verified, not execution-tested.
+**Fedora 44/45 · x86_64/aarch64.** Daily stable-release updates; unmodified application source and offline RPM builds.
 
 ## Install
 
-### 1. Verify and import the repository key
-
-You are trusting this repository's signing key. Compare the full fingerprint with a trusted copy of the [committed public key](config/signing-key.asc) or another independent maintainer channel:
-
-```text
-EB74D9B819729F12F360B24EA07E0E6DD4BBEF5C
-```
+Coming from Pages? [Remove its repository file first](#migrating-from-pages).
 
 ```bash
-curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://ulnanlu.github.io/mkbrr-dnf-repo/RPM-GPG-KEY-mkbrr-community \
-  -o /tmp/mkbrr-community.asc
-gpg --show-keys --with-fingerprint /tmp/mkbrr-community.asc
-# Import only after checking the fingerprint.
-sudo rpmkeys --import /tmp/mkbrr-community.asc
+sudo dnf copr enable ulnanlu/autobrr-community
+sudo dnf install autobrr mkbrr qui  # choose the packages you need
 ```
 
-### 2. Add the repository
+Confirm the project signing key: **`9DC7507E8E0F101F6F2D1D2C35B2DA8C228F2512`**. Keep package GPG checks enabled. The COPR plugin is supplied by `dnf5-plugins` or `dnf-plugins-core`.
 
-DNF5 (`dnf5-plugins` provides `config-manager`):
+Update with DNF, not the applications' self-updaters. Large `.src.rpm` files contain build inputs, not normal installation payloads.
+
+## Optional user services
 
 ```bash
-sudo dnf config-manager addrepo --from-repofile=https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo
+systemctl --user daemon-reload
+systemctl --user enable --now autobrr.service  # or qui.service
 ```
 
-DNF4 (`dnf-plugins-core`):
+Services are not started on installation. Configuration: `~/.config/autobrr/` and `~/.config/qui/`; qui data: `~/.local/share/qui/`. To run while logged out, enable lingering with `sudo loginctl enable-linger "$USER"`.
+
+## Migrating from Pages
+
+The old Pages mirror is retired. Remove its repository file before using COPR:
 
 ```bash
-sudo dnf config-manager --add-repo https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo
-```
-
-Without either plugin:
-
-```bash
-sudo curl --fail --location --proto '=https' --proto-redir '=https' \
-  https://ulnanlu.github.io/mkbrr-dnf-repo/mkbrr-community.repo \
-  -o /etc/yum.repos.d/mkbrr-community.repo
-```
-
-### 3. Install and update
-
-```bash
-sudo dnf install mkbrr
-sudo dnf upgrade mkbrr
-```
-
-Use DNF rather than mkbrr's self-updater. The latest three stable versions are retained; use `sudo dnf downgrade mkbrr` for a retained older version. Both package and metadata GPG checks are enabled.
-
-## Remove
-
-```bash
-sudo rm /etc/yum.repos.d/mkbrr-community.repo
+sudo rm -f /etc/yum.repos.d/mkbrr-community.repo
 sudo dnf clean all
 ```
 
-Optionally uninstall with `sudo dnf remove mkbrr`. To remove the trusted key, identify its exact entry with `rpm -qa 'gpg-pubkey*'` and `rpm -qi`, then remove only that entry with `sudo rpm -e`.
+Existing application configuration is not moved or overwritten.
 
-## Troubleshooting
+## License
 
-- **Signature errors:** check the fingerprint and system clock, then try `sudo dnf clean all`. DNF may request the same key separately for metadata. Never disable GPG checks.
-- **No package found:** check `uname -m`, `dnf repolist`, and `dnf --refresh list --showduplicates mkbrr`.
-- **404 or unavailable:** check the [publishing workflow](https://github.com/ulnanlu/mkbrr-dnf-repo/actions/workflows/sync.yml). Failed syncs leave the previous repository online.
-
-## Maintenance
-
-See [docs/maintaining.md](docs/maintaining.md) for setup, signing keys, synchronization, and tests.
-
-## License and source
-
-Repository automation: [MIT](LICENSE). mkbrr: [GPL-2.0](https://github.com/autobrr/mkbrr/blob/develop/LICENSE). [Signed provenance](https://ulnanlu.github.io/mkbrr-dnf-repo/provenance.json) records upstream tags, source links, and original checksums. Matching source, build scripts, licenses, and dependency sources are served alongside binaries; see the [source instructions](https://ulnanlu.github.io/mkbrr-dnf-repo/sources/README.txt).
+Packaging automation: [MIT](LICENSE). Applications: GPL-2.0-or-later, with bundled dependency notices and source provenance installed alongside them. Matching source RPMs are hosted by COPR.

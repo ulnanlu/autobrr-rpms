@@ -15,6 +15,7 @@ on:
       - 'config/copr.json'
       - 'packaging/**'
       - 'scripts/copr_sync.py'
+      - 'scripts/common.py'
       - '.github/workflows/copr.yml'
 
 permissions:
@@ -26,7 +27,6 @@ concurrency:
 
 jobs:
   source:
-    # The existing Pages repository remains independent until COPR is configured.
     if: >-
       github.ref == format('refs/heads/{0}', github.event.repository.default_branch) &&
       (vars.COPR_PROJECT != '' || github.event_name == 'workflow_dispatch')
@@ -52,7 +52,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$COPR_PROJECT" ]]; then
-            echo '::error::Configure COPR_PROJECT and COPR_CONFIG using docs/copr.md first.'
+            echo '::error::Configure COPR_PROJECT and COPR_CONFIG using docs/maintaining.md first.'
             exit 1
           fi
           python3 - <<'PY'
@@ -117,7 +117,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -z "$COPR_CONFIG" ]]; then
-            echo '::error::COPR_CONFIG secret is missing. See docs/copr.md.'
+            echo '::error::COPR_CONFIG secret is missing. See docs/maintaining.md.'
             exit 1
           fi
           args=(--target "$COPR_PROJECT" --output ".work/copr/$PACKAGE")

@@ -26,9 +26,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 if __package__:
-    from . import sync as repo
+    from . import common as repo
 else:
-    import sync as repo
+    import common as repo
 
 ROOT = Path(__file__).resolve().parents[1]
 COPR_URL = "https://copr.fedorainfracloud.org"
@@ -837,7 +837,7 @@ def initialize(config_path, github_repository=None):
     )
     check_project(client, owner, project, config["chroots"])
     if github_repository:
-        repo.base_url(github_repository)  # Validate OWNER/REPOSITORY before calling gh.
+        repo.validate_github_repository(github_repository)
         repo.run(
             ["gh", "secret", "set", "COPR_CONFIG", "--repo", github_repository, "--env", "copr"],
             input=Path(config_path).read_text(),

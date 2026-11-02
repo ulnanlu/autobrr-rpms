@@ -6,7 +6,9 @@ on:
       - 'config/copr.json'
       - 'packaging/**'
       - 'scripts/copr_sync.py'
+      - 'scripts/common.py'
       - 'tests/test_copr_sync.py'
+      - 'tests/test_common.py'
       - '.github/workflows/copr*.yml'
   push:
     branches: [main]
@@ -14,7 +16,9 @@ on:
       - 'config/copr.json'
       - 'packaging/**'
       - 'scripts/copr_sync.py'
+      - 'scripts/common.py'
       - 'tests/test_copr_sync.py'
+      - 'tests/test_common.py'
       - '.github/workflows/copr*.yml'
   workflow_dispatch:
 
@@ -42,7 +46,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Unit tests
-        run: python3 -m unittest discover -s tests -p test_copr_sync.py -v
+        run: python3 -m unittest discover -s tests -v
       - name: Prepare unmodified upstream source and vendored dependencies
         env:
           GH_TOKEN: ${{ github.token }}

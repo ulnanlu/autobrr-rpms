@@ -38,7 +38,7 @@
     "qui": {
       "upstream": "autobrr/qui",
       "module": "github.com/autobrr/qui",
-      "release": 2,
+      "release": 3,
       "spec": "packaging/webapp.spec.in",
       "summary": "Self-hosted web interface for qBittorrent",
       "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unlicense AND 0BSD AND BlueOak-1.0.0 AND CC-BY-4.0 AND CC0-1.0 AND MIT-0 AND Zlib",

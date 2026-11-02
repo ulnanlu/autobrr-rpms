@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from scripts import common as repo
 from scripts import copr_sync as copr
-from scripts import sync as repo
 
 CHROOTS = ["fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64"]
 COMMIT = "a" * 40
@@ -418,6 +418,8 @@ class FrontendTests(unittest.TestCase):
                 "%{_userunitdir}",
             ):
                 self.assertIn(value, spec)
+            if package == "qui":
+                self.assertIn("go test -mod=vendor -count=1 -short -parallel=1 ./...", spec)
             unit = (copr.ROOT / "packaging" / f"{package}.service").read_text()
             self.assertIn("NoNewPrivileges=true", unit)
             self.assertNotIn("User=root", unit)

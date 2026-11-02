@@ -1,7 +1,7 @@
 [project]
-name = "mkbrr-community-repository"
+name = "autobrr-rpms"
 version = "1.0.0"
-description = "Independent, verified and signed redistribution of official mkbrr RPMs"
+description = "Unofficial source-built autobrr application RPMs for Fedora COPR"
 requires-python = ">=3.11"
 dependencies = []
 
