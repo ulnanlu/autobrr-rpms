@@ -21,7 +21,7 @@ sudo dnf install autobrr mkbrr qui  # choose the packages you need
 
 Confirm the project signing key: **`AED00F97B6F0520E98B18F4B20995ABDC582B8D3`**. Keep package GPG checks enabled. The COPR plugin is supplied by `dnf5-plugins` or `dnf-plugins-core`.
 
-Update with DNF, not the applications' self-updaters. Large `.src.rpm` files contain build inputs, not normal installation payloads.
+Update with DNF, not the applications' self-updaters.
 
 ## Optional user services
 
