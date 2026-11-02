@@ -428,9 +428,7 @@ class FrontendTests(unittest.TestCase):
 
 class CoprStateTests(unittest.TestCase):
     def test_copr_destination_validation(self):
-        self.assertEqual(
-            copr.target("fedora-user/autobrr-community"), ["fedora-user", "autobrr-community"]
-        )
+        self.assertEqual(copr.target("fedora-user/autobrr-rpms"), ["fedora-user", "autobrr-rpms"])
         for value in (
             "",
             "https://evil.test/project",
@@ -579,10 +577,10 @@ class CoprStateTests(unittest.TestCase):
             config.write_text("private config fixture")
             copr.initialize(config, "different-github-owner/repo")
             self.assertEqual(
-                client.project_proxy.add.call_args.args[:2], ("fedora-user", "autobrr-community")
+                client.project_proxy.add.call_args.args[:2], ("fedora-user", "autobrr-rpms")
             )
             self.assertEqual(run.call_args_list[0].args[0][-2:], ["--env", "copr"])
-            self.assertEqual(run.call_args_list[-1].args[0][-1], "fedora-user/autobrr-community")
+            self.assertEqual(run.call_args_list[-1].args[0][-1], "fedora-user/autobrr-rpms")
 
 
 if __name__ == "__main__":

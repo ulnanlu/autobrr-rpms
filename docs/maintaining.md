@@ -1,6 +1,6 @@
 # Maintenance
 
-Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-community` on Fedora 44/45, x86_64/aarch64. The COPR project name stays stable for existing users; GitHub hosts packaging code only.
+Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on Fedora 44/45, x86_64/aarch64. COPR builds, signs, and hosts the packages; GitHub hosts packaging code only.
 
 ## Automation
 
@@ -16,7 +16,7 @@ Fedora 44 bootstraps checksum-pinned Go 1.27.3 source with its distribution comp
 
 Build networking is disabled in COPR. Source/vendor/tool checksums are rechecked during `%prep`; compiler or package-manager requirement changes fail closed. Bump a recipe's `release` for packaging changes to an existing version. Review bundled licenses when updating recipes.
 
-Validation does not upload duplicate SRPMs. Intermediate submission artifacts expire after one day and are deleted after successful publication. No Pages deployment or separate signing key is needed.
+Validation does not upload duplicate SRPMs. Intermediate submission artifacts expire after one day and are deleted after successful publication.
 
 ## Credentials
 
@@ -50,4 +50,4 @@ python3 scripts/copr_sync.py build --output .work/qui
 python3 scripts/copr_sync.py test-install --output .work/qui
 ```
 
-Use `mkbrr` or `autobrr` instead of `qui` as needed. Artifacts stay under gitignored `.work/`. Test installation uses an isolated RPM database and a disposable signing key, never a real publishing key or disabled signature checks. User services remain disabled until explicitly enabled; existing services and configuration are not migrated automatically.
+Use `mkbrr` or `autobrr` instead of `qui` as needed. Artifacts stay under gitignored `.work/`. Test installation uses an isolated RPM database and a disposable signing key, never a real publishing key or disabled signature checks. User services remain disabled until explicitly enabled.
