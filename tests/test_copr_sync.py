@@ -44,6 +44,7 @@ def client_with(builds):
         "enable_net": False,
         "chroot_repos": dict.fromkeys(CHROOTS, "https://example.invalid/"),
     }
+    client.project_chroot_proxy.get.return_value = {"additional_modules": ["nodejs:24"]}
     return client
 
 
@@ -57,6 +58,7 @@ class FakeSource:
         releases=None,
         license_file="LICENSE",
         readme=None,
+        package="mkbrr",
     ):
         self.releases = releases or [{"tag_name": "v1.2.3", "draft": False, "prerelease": False}]
         archive = io.BytesIO()
@@ -68,7 +70,7 @@ class FakeSource:
                 license_file: "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n",
             }
             for name, content in files.items():
-                member = tarfile.TarInfo(f"{module.rsplit('/', 1)[-1]}-{COMMIT}/{name}")
+                member = tarfile.TarInfo(f"{package}-{COMMIT}/{name}")
                 member.size = len(content.encode())
                 tar.addfile(member, io.BytesIO(content.encode()))
             if extra:
@@ -117,9 +119,12 @@ class SourceTests(unittest.TestCase):
 
     def test_changed_module_or_malformed_go_version_rejected(self):
         _, recipe = copr.settings()
-        for network in (FakeSource(module="example.org/other"), FakeSource(go="garbage")):
+        for network, message in (
+            (FakeSource(module="example.org/other"), "Unexpected upstream Go module"),
+            (FakeSource(go="garbage"), "Unexpected Go version directive"),
+        ):
             with tempfile.TemporaryDirectory() as directory:
-                with self.assertRaises(repo.InvalidRepository):
+                with self.assertRaisesRegex(repo.InvalidRepository, message):
                     copr.upstream_source(network, "mkbrr", recipe, Path(directory) / "sources")
 
     def test_only_explicit_historical_nonsemver_tags_are_excluded(self):
@@ -153,6 +158,7 @@ class SourceTests(unittest.TestCase):
         for package in ("tqm", "sfvbrr"):
             _, recipe = copr.settings(package)
             network = FakeSource(
+                package=package,
                 module=recipe["module"],
                 replace="\n".join(recipe.get("module_replacements", [])),
                 license_file=recipe.get("license_file", "LICENSE"),
@@ -570,6 +576,8 @@ class FrontendTests(unittest.TestCase):
                 "go test -mod=vendor -count=1 -short",
                 "%{_userunitdir}",
                 "%if 0%{?rhel} == 9",
+                "BuildRequires:  nodejs >= 1:24.0",
+                "BuildRequires:  nodejs < 1:25",
                 "ln -s /usr/bin/node .build-bin/node",
                 "%if 0%{?fedora} == 44 || 0%{?rhel}",
             ):
@@ -583,6 +591,20 @@ class FrontendTests(unittest.TestCase):
 
 
 class CoprStateTests(unittest.TestCase):
+    def test_unreviewed_module_streams_are_rejected(self):
+        config, _ = copr.settings()
+        for modules in (
+            {"epel-9-x86_64": ["nodejs:16"]},
+            {"epel-8-x86_64": ["nodejs:24"]},
+            {"fedora-45-x86_64": ["nodejs:24"]},
+            [],
+        ):
+            with patch.object(
+                Path, "read_text", return_value=json.dumps({**config, "chroot_modules": modules})
+            ):
+                with self.assertRaisesRegex(repo.InvalidRepository, "Unreviewed COPR module"):
+                    copr.settings()
+
     def test_copr_destination_validation(self):
         self.assertEqual(copr.target("fedora-user/autobrr-rpms"), ["fedora-user", "autobrr-rpms"])
         for value in (
@@ -648,6 +670,39 @@ class CoprStateTests(unittest.TestCase):
             client.project_proxy.get.return_value = remote
             with self.assertRaises(repo.InvalidRepository):
                 copr.check_project(client, "owner", "project", CHROOTS)
+
+    def test_publication_requires_the_reviewed_el9_node_stream(self):
+        client = client_with([])
+        config, _ = copr.settings()
+        modules = config["chroot_modules"]
+        copr.check_project(client, "owner", "project", CHROOTS, modules)
+        for streams in ([], ["nodejs:16"], ["nodejs:22"]):
+            client.project_chroot_proxy.get.return_value = {"additional_modules": streams}
+            with self.assertRaisesRegex(repo.InvalidRepository, "Configure COPR module streams"):
+                copr.check_project(client, "owner", "project", CHROOTS, modules)
+
+    def test_init_configures_missing_streams_but_preserves_conflicting_settings(self):
+        client = client_with([])
+        client.base_proxy.auth_username.return_value = "fedora-user"
+        client.mock_chroot_proxy.get_list.return_value = dict.fromkeys(CHROOTS)
+        client.project_chroot_proxy.get.side_effect = [
+            {"additional_modules": []},
+            {"additional_modules": []},
+            {"additional_modules": ["nodejs:24"]},
+            {"additional_modules": ["nodejs:24"]},
+        ]
+        with patch.object(copr, "copr_client", return_value=client):
+            copr.initialize(None)
+        self.assertEqual(client.project_chroot_proxy.edit.call_count, 2)
+        for call in client.project_chroot_proxy.edit.call_args_list:
+            self.assertEqual(call.kwargs, {"additional_modules": ["nodejs:24"]})
+        client.project_chroot_proxy.get.side_effect = None
+        client.project_chroot_proxy.get.return_value = {"additional_modules": ["nodejs:16"]}
+        client.project_chroot_proxy.edit.reset_mock()
+        with patch.object(copr, "copr_client", return_value=client):
+            with self.assertRaisesRegex(repo.InvalidRepository, "conflicting module streams"):
+                copr.initialize(None)
+        client.project_chroot_proxy.edit.assert_not_called()
 
     def test_successful_preparation_skips_vendoring_when_current(self):
         with (

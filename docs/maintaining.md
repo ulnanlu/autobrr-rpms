@@ -14,7 +14,7 @@ Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on 
 
 Fedora 44 and EL 9/10 bootstrap checksum-pinned Go 1.27.3 source with their distribution compiler. Fedora 45 uses its distribution Go. Web builds use distribution Node 24 (the `nodejs:24` module on EL 9), frozen lockfiles, offline dependency installation, and no dependency install scripts. Private premium themes are not fetched.
 
-EL builds use COPR's EPEL 9/10 targets. CI also builds and tests on AlmaLinux 9/10; compatible RHEL and Rocky Linux releases share the EL packages. EL 9 preparation needs Python 3.12, not its default Python 3.9. No Go or Node runtime is needed by the installed applications.
+EL builds use COPR's EPEL 9/10 targets. CI also builds and tests on AlmaLinux 9/10; compatible RHEL and Rocky Linux releases share the EL packages. EL 9 preparation needs Python 3.12, not its default Python 3.9. Its COPR chroots must enable the `nodejs:24` stream from `chroot_modules`; publication checks it before uploading. No Go or Node runtime is needed by the installed applications.
 
 Build networking is disabled in COPR. Source/vendor/tool checksums are rechecked during `%prep`; compiler or package-manager requirement changes fail closed. Bump a recipe's `release` for packaging changes to an existing version. Review bundled licenses when updating recipes.
 
@@ -32,7 +32,7 @@ uv run --with 'copr>=2.5,<3' python scripts/copr_sync.py init \
 gh workflow run copr.yml --ref main
 ```
 
-`init` uses the authenticated Fedora identity, checks existing project settings without overwriting them, stores `COPR_CONFIG` in the protected `copr` GitHub environment, and sets `COPR_PROJECT`. Restrict that environment to `main` and renew credentials before expiry. Pull requests receive no COPR credentials.
+`init` uses the authenticated Fedora identity, validates existing project settings, and configures missing module streams without overwriting conflicting selections. It stores `COPR_CONFIG` in the protected `copr` GitHub environment and sets `COPR_PROJECT`. Restrict that environment to `main` and renew credentials before expiry. Pull requests receive no COPR credentials.
 
 Force a checked rebuild with `gh workflow run copr.yml -f force=true`. COPR controls retention and availability; storage is not unlimited.
 

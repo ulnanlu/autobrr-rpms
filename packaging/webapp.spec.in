@@ -26,7 +26,8 @@ BuildRequires:  golang >= @BOOTSTRAP_VERSION@
 BuildRequires:  golang >= @GO_VERSION@
 %endif
 %if 0%{?rhel} == 9
-BuildRequires:  nodejs >= 24
+BuildRequires:  nodejs >= 1:24.0
+BuildRequires:  nodejs < 1:25
 %else
 BuildRequires:  nodejs24
 %endif

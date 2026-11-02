@@ -74,6 +74,16 @@ def settings(package="mkbrr"):
         ),
         "Unreviewed COPR build target",
     )
+    modules = config.get("chroot_modules", {})
+    repo.require(
+        isinstance(modules, dict)
+        and set(modules) <= set(config["chroots"])
+        and all(
+            chroot.startswith("epel-9-") and streams == ["nodejs:24"]
+            for chroot, streams in modules.items()
+        ),
+        "Unreviewed COPR module configuration",
+    )
     toolchain = config["toolchain"]
     repo.require(
         all(re.fullmatch(r"\d+\.\d+\.\d+", toolchain[k]) for k in ("version", "bootstrap_version"))
@@ -168,13 +178,19 @@ def current_build(client, owner, project, package, version, release, chroots):
     raise repo.InvalidRepository("COPR build pagination limit reached")
 
 
-def check_project(client, owner, project, chroots):
+def check_project(client, owner, project, chroots, modules=None):
     remote = client.project_proxy.get(owner, project)
     repo.require(
         set(chroots) <= set(remote["chroot_repos"]),
         "COPR project lacks configured chroots; update its settings first",
     )
     repo.require(not remote["enable_net"], "Disable network access in the COPR build project")
+    for chroot, streams in (modules or {}).items():
+        remote_chroot = client.project_chroot_proxy.get(owner, project, chroot)
+        repo.require(
+            remote_chroot["additional_modules"] == streams,
+            f"Configure COPR module streams for {chroot}: {', '.join(streams)}",
+        )
     return remote
 
 
@@ -567,7 +583,7 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         if check_copr:
             owner, project = target(check_copr)
             client = copr_client()
-            check_project(client, owner, project, config["chroots"])
+            check_project(client, owner, project, config["chroots"], config.get("chroot_modules"))
             build = current_build(
                 client, owner, project, package, plan["version"], plan["release"], plan["chroots"]
             )
@@ -863,7 +879,7 @@ def submit(output, destination, config_path, force=False, client=None):
     repo.verify_checksum(srpm, plan["srpm_sha256"])
     client = client or copr_client(config_path)
     client.base_proxy.auth_check()
-    check_project(client, owner, project, plan["chroots"])
+    check_project(client, owner, project, plan["chroots"], config.get("chroot_modules"))
     existing = current_build(
         client, owner, project, plan["package"], plan["version"], plan["release"], plan["chroots"]
     )
@@ -900,7 +916,12 @@ def initialize(config_path, github_repository=None):
             f"sudo dnf install {' '.join(config['packages'])}"
         ),
     )
-    check_project(client, owner, project, config["chroots"])
+    for chroot, streams in config.get("chroot_modules", {}).items():
+        current = client.project_chroot_proxy.get(owner, project, chroot)["additional_modules"]
+        repo.require(current in ([], streams), f"Review conflicting module streams for {chroot}")
+        if not current:
+            client.project_chroot_proxy.edit(owner, project, chroot, additional_modules=streams)
+    check_project(client, owner, project, config["chroots"], config.get("chroot_modules"))
     if github_repository:
         repo.validate_github_repository(github_repository)
         repo.run(
