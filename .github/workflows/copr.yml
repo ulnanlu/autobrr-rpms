@@ -32,16 +32,17 @@ jobs:
       (vars.COPR_PROJECT != '' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-24.04
     container: registry.fedoraproject.org/fedora:45
-    timeout-minutes: 40
+    timeout-minutes: 90
     outputs:
-      changed: ${{ steps.prepare.outputs.changed }}
+      packages: ${{ steps.prepare.outputs.packages }}
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
     steps:
       - name: Install source packaging tools
-        run: dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config copr-cli git
+        run: dnf -y install python3 golang nodejs24 systemd-rpm-macros rpm-build rpm-sign gnupg2 redhat-rpm-config copr-cli git
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Prepare source RPM when upstream changes
+      - name: Prepare, build and test changed packages
         id: prepare
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,29 +55,44 @@ jobs:
             echo '::error::Configure COPR_PROJECT and COPR_CONFIG using docs/copr.md first.'
             exit 1
           fi
-          args=(--check-copr "$COPR_PROJECT")
-          if [[ "$FORCE" == true ]]; then args+=(--force); fi
-          python3 scripts/copr_sync.py prepare "${args[@]}"
-      - name: Compile and test before submission
-        if: steps.prepare.outputs.changed == 'true'
-        run: |
-          python3 scripts/copr_sync.py build
-          python3 scripts/copr_sync.py test-install
+          python3 - <<'PY'
+          import json
+          import logging
+          import os
+          from pathlib import Path
+          from scripts import copr_sync as copr
+          logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+          changed = []
+          config, _ = copr.settings()
+          for package in config["packages"]:
+              output = Path(".work/copr", package).resolve()
+              if copr.prepare(package, output, os.environ["COPR_PROJECT"], os.environ["FORCE"] == "true"):
+                  copr.build_local(output)
+                  copr.test_install(output)
+                  changed.append(package)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as stream:
+              stream.write(f"packages={json.dumps(changed)}\n")
+          PY
       - name: Upload source package
-        if: steps.prepare.outputs.changed == 'true'
+        id: upload
+        if: steps.prepare.outputs.packages != '[]'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: copr-source
           path: |
-            .work/copr/plan.json
-            .work/copr/SRPMS/*.src.rpm
+            .work/copr/*/plan.json
+            .work/copr/*/SRPMS/*.src.rpm
           if-no-files-found: error
           overwrite: true
-          retention-days: 7
+          retention-days: 1
 
   submit:
     needs: source
-    if: needs.source.outputs.changed == 'true'
+    if: needs.source.outputs.packages != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.source.outputs.packages) }}
     runs-on: ubuntu-24.04
     container: registry.fedoraproject.org/fedora:45
     environment: copr
@@ -96,6 +112,7 @@ jobs:
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
           COPR_PROJECT: ${{ vars.COPR_PROJECT }}
           FORCE: ${{ inputs.force || false }}
+          PACKAGE: ${{ matrix.package }}
         shell: bash
         run: |
           set -euo pipefail
@@ -103,6 +120,19 @@ jobs:
             echo '::error::COPR_CONFIG secret is missing. See docs/copr.md.'
             exit 1
           fi
-          args=(--target "$COPR_PROJECT")
+          args=(--target "$COPR_PROJECT" --output ".work/copr/$PACKAGE")
           if [[ "$FORCE" == true ]]; then args+=(--force); fi
           python3 scripts/copr_sync.py submit "${args[@]}"
+
+  cleanup:
+    needs: [source, submit]
+    if: needs.submit.result == 'success' && needs.source.outputs.artifact_id != ''
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+    steps:
+      - name: Remove this run's intermediate SRPM artifact after COPR publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.source.outputs.artifact_id }}
+        run: gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/artifacts/$ARTIFACT_ID"

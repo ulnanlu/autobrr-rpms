@@ -6,6 +6,12 @@
     "bootstrap_version": "1.26.0",
     "sha256": "6e7749035cf360f06b2575d162ea79df9fda8ef671889e5c375f8e50777f26bb"
   },
+  "frontend_licenses": [
+    "MIT", "ISC", "Apache-2.0", "BSD-2-Clause", "BSD-3-Clause", "0BSD",
+    "BlueOak-1.0.0", "CC-BY-4.0", "CC0-1.0", "MIT-0", "MPL-2.0", "Python-2.0",
+    "Unlicense", "(MIT OR CC0-1.0)", "(BSD-3-Clause AND Apache-2.0)",
+    "(MIT AND BSD-3-Clause)", "(MIT AND Zlib)"
+  ],
   "packages": {
     "mkbrr": {
       "upstream": "autobrr/mkbrr",
@@ -13,6 +19,35 @@
       "release": 2,
       "spec": "packaging/mkbrr.spec.in",
       "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0"
+    },
+    "autobrr": {
+      "upstream": "autobrr/autobrr",
+      "module": "github.com/autobrr/autobrr",
+      "release": 2,
+      "spec": "packaging/webapp.spec.in",
+      "summary": "Download automation for torrents and Usenet",
+      "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unlicense AND 0BSD AND BlueOak-1.0.0 AND CC-BY-4.0 AND CC0-1.0 AND MIT-0 AND Python-2.0",
+      "license_markers": ["GPLv2+"],
+      "module_replacements": ["replace github.com/r3labs/sse/v2 => github.com/autobrr/sse/v2 v2.0.0-20230520125637-530e06346d7d"],
+      "binaries": ["autobrr", "autobrrctl"],
+      "frontend": {
+        "pnpm": "11.24.0",
+        "integrity": "sha512-vSfjRel23LC+C3oSKCF7BJqBfiGx81XJDb59xGZxiVqLwebQbCRVRQXqk+oLRfSJon7Bv7yN5qlln8oPFvoAAA=="
+      }
+    },
+    "qui": {
+      "upstream": "autobrr/qui",
+      "module": "github.com/autobrr/qui",
+      "release": 2,
+      "spec": "packaging/webapp.spec.in",
+      "summary": "Self-hosted web interface for qBittorrent",
+      "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unlicense AND 0BSD AND BlueOak-1.0.0 AND CC-BY-4.0 AND CC0-1.0 AND MIT-0 AND Zlib",
+      "license_markers": ["GPL-2.0-or-later"],
+      "binaries": ["qui"],
+      "frontend": {
+        "pnpm": "11.1.2",
+        "integrity": "sha512-QVocwll0cx51RVwUaDcb50xapft2IbUNQFbSIkUWCfEUEvI/1gLmFp8eBgRmZB95hZfhvpYaEGiINqZ7FlaUmQ=="
+      }
     }
   }
 }

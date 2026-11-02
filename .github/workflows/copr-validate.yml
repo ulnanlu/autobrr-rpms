@@ -31,12 +31,13 @@ jobs:
       fail-fast: false
       matrix:
         fedora: ['44', '45']
+        package: [mkbrr, autobrr, qui]
     runs-on: ubuntu-24.04
     container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
     timeout-minutes: 60
     steps:
       - name: Install source build tools
-        run: dnf -y install python3 golang rpm-build rpm-sign gnupg2 redhat-rpm-config git
+        run: dnf -y install python3 golang nodejs24 systemd-rpm-macros rpm-build rpm-sign gnupg2 redhat-rpm-config git
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
@@ -45,15 +46,9 @@ jobs:
       - name: Prepare unmodified upstream source and vendored dependencies
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python3 scripts/copr_sync.py prepare
+          PACKAGE: ${{ matrix.package }}
+        run: python3 scripts/copr_sync.py prepare --package "$PACKAGE"
       - name: Compile, run upstream tests, and install in a disposable root
         run: |
           python3 scripts/copr_sync.py build
           python3 scripts/copr_sync.py test-install
-      - name: Upload tested source package
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: tested-copr-srpm-fedora-${{ matrix.fedora }}
-          path: .work/copr/SRPMS/*.src.rpm
-          if-no-files-found: error
-          retention-days: 7

@@ -1,0 +1,14 @@
+[Unit]
+Description=qui qBittorrent web interface
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/qui serve --config-dir=%h/.config/qui --data-dir=%h/.local/share/qui
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target

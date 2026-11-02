@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import configparser
 import datetime as dt
 import gzip
@@ -13,10 +14,15 @@ import logging
 import os
 import re
 import shutil
+import socket
 import subprocess
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
 if __package__:
@@ -60,6 +66,14 @@ def settings(package="mkbrr"):
     )
     spec = (ROOT / recipe["spec"]).resolve()
     repo.require(spec.is_relative_to(ROOT.resolve()) and spec.is_file(), "Invalid spec template")
+    if frontend := recipe.get("frontend"):
+        repo.require(
+            re.fullmatch(r"\d+\.\d+\.\d+", frontend["pnpm"]), "Invalid pinned pnpm version"
+        )
+        repo.require(
+            re.fullmatch(r"sha512-[A-Za-z0-9+/]{86}==", frontend["integrity"]),
+            "Invalid pinned pnpm integrity",
+        )
     return config, recipe
 
 
@@ -200,11 +214,16 @@ def upstream_source(network, package, recipe, directory):
     )
     match = re.search(r"^go (\d+\.\d+\.\d+)\s*$", module, re.M)
     repo.require(match, "Unexpected Go version directive")
-    repo.require(not re.search(r"^\s*replace\b", module, re.M), "Review module replacements first")
-    # This pilot has a reviewed GPL-2.0-or-later grant in the upstream README.
+    replacements = re.findall(r"^\s*(replace\b[^\n]*)", module, re.M)
+    repo.require(
+        replacements == recipe.get("module_replacements", []), "Review module replacements first"
+    )
     readme = (source_dir / "README.md").read_text()
     repo.require(
-        "either version 2" in readme and "any later version" in readme,
+        all(
+            marker in readme
+            for marker in recipe.get("license_markers", ["either version 2", "any later version"])
+        ),
         "Review changed upstream licensing before building",
     )
     plan = {
@@ -222,6 +241,8 @@ def upstream_source(network, package, recipe, directory):
         "source_url": url,
         "source_sha256": repo.sha256(archive),
         "license": recipe["license"],
+        "summary": recipe.get("summary", ""),
+        "binaries": recipe.get("binaries", [package]),
     }
     return plan, archive, source_dir
 
@@ -296,6 +317,181 @@ def render_spec(recipe, plan):
     return text
 
 
+def complete_pnpm_metadata(network, cache):
+    """Preserve full registry records for cold offline pnpm policy checks."""
+    abbreviated = cache / "v11/metadata/registry.npmjs.org"
+    full = cache / "v11/metadata-full/registry.npmjs.org"
+    missing = [
+        p.relative_to(abbreviated)
+        for p in abbreviated.rglob("*.jsonl")
+        if not (full / p.relative_to(abbreviated)).exists()
+    ]
+
+    def download(relative):
+        name = str(relative).removesuffix(".jsonl")
+        repo.require(
+            re.fullmatch(r"(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+", name), "Unsafe npm cache name"
+        )
+        destination = full / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_suffix(".json")
+        network.download(
+            f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='@')}",
+            temporary,
+            limit=128 * repo.MIB,
+            hosts={"registry.npmjs.org"},
+        )
+        metadata = json.loads(temporary.read_text())
+        repo.require(
+            metadata.get("name") == name
+            and isinstance(metadata.get("versions"), dict)
+            and isinstance(metadata.get("time"), dict),
+            "Incomplete npm registry metadata",
+        )
+        # pnpm 11's JSONL cache stores response headers, then the registry record.
+        destination.write_text("{}\n" + json.dumps(metadata, separators=(",", ":")) + "\n")
+        temporary.unlink()
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        list(executor.map(download, missing))
+
+
+def frontend_sources(network, config, recipe, plan, source_dir, sources):
+    frontend = recipe["frontend"]
+    web = source_dir / "web"
+    manifests = {
+        p: repo.sha256(p)
+        for p in (web / "package.json", web / "pnpm-lock.yaml", web / "pnpm-workspace.yaml")
+        if p.is_file()
+    }
+    manifest = json.loads((web / "package.json").read_text())
+    repo.require(
+        manifest.get("engines", {}).get("node") == ">=24.0",
+        "Review the changed frontend Node requirement",
+    )
+    repo.require(
+        manifest["packageManager"] == f"pnpm@{frontend['pnpm']}",
+        "Review the changed frontend package manager pin",
+    )
+    pnpm = sources / f"pnpm-{frontend['pnpm']}.tgz"
+    network.download(
+        f"https://registry.npmjs.org/pnpm/-/{pnpm.name}",
+        pnpm,
+        limit=32 * repo.MIB,
+        hosts={"registry.npmjs.org"},
+    )
+    integrity = "sha512-" + base64.b64encode(hashlib.sha512(pnpm.read_bytes()).digest()).decode()
+    repo.require(integrity == frontend["integrity"], "pnpm source integrity mismatch")
+    tool = source_dir / ".pnpm-tool"
+    with tarfile.open(pnpm) as archive:
+        archive.extractall(tool, filter="data")
+    inputs = source_dir / ".frontend-inputs"
+    inputs.mkdir()
+    store, cache = inputs / "pnpm-store", inputs / "pnpm-cache"
+    store.mkdir()
+    cache.mkdir()
+    # No publishing credentials or host npm configuration enter dependency resolution.
+    home = inputs / "home"
+    home.mkdir()
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k in ("PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR")
+    }
+    env.update({"HOME": str(home), "CI": "true"})
+    command = ["node-24", str(tool / "package/bin/pnpm.cjs"), "--dir", "web"]
+    options = [
+        "--frozen-lockfile",
+        "--ignore-scripts",
+        "--store-dir",
+        str(store),
+        f"--config.cache-dir={cache}",
+        "--cpu=x64",
+        "--cpu=arm64",
+        "--os=linux",
+        "--libc=glibc",
+    ]
+    # Install also caches metadata needed for pnpm's offline supply-chain checks.
+    for action in ("fetch", "install"):
+        result = subprocess.run(
+            [*command, action, *options],
+            cwd=source_dir,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=1200,
+            check=False,
+        )
+        repo.require(
+            result.returncode == 0, f"pnpm {action} failed:\n{result.stdout}\n{result.stderr}"
+        )
+    repo.require(
+        all(repo.sha256(p) == digest for p, digest in manifests.items()),
+        "Frontend dependency resolution modified upstream manifests",
+    )
+    complete_pnpm_metadata(network, cache)
+    licenses = inputs / "frontend-licenses"
+    licenses.mkdir()
+    shutil.copy2(tool / "package/LICENSE", licenses / "PNPM-LICENSE")
+    modules = web / "node_modules/.pnpm"
+    records = {}
+    for path in [
+        *modules.glob("*/node_modules/*/package.json"),
+        *modules.glob("*/node_modules/@*/*/package.json"),
+    ]:
+        if not path.is_file() or path.parent.is_symlink():
+            continue
+        data = json.loads(path.read_text())
+        name, version = data["name"], data["version"]
+        repo.require(re.fullmatch(r"(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+", name), "Unsafe npm name")
+        repo.safe_name(version)
+        license = data.get("license")
+        if not license and isinstance(data.get("licenses"), list):
+            license = " OR ".join(item["type"] for item in data["licenses"])
+        repo.require(
+            license in config["frontend_licenses"],
+            f"Review frontend license for {name}@{version}: {license}",
+        )
+        records[(name, version)] = {"name": name, "version": version, "license": license}
+        destination = licenses / name / version
+        destination.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, destination / "package.json")
+        for notice in path.parent.rglob("*"):
+            if (
+                notice.is_file()
+                and not notice.is_symlink()
+                and re.match(
+                    r"^(LICENSE|LICENCE|COPYING|NOTICE|COPYRIGHT)([._-].*)?$", notice.name, re.I
+                )
+            ):
+                target = destination / notice.relative_to(path.parent)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(notice, target)
+    repo.require(records, "Frontend dependency license inventory is empty")
+    (licenses / "packages.json").write_text(repo.canonical([records[k] for k in sorted(records)]))
+    for link in store.glob("*/projects/*"):
+        repo.require(
+            link.is_symlink() and link.resolve() == web.resolve(),
+            "Unexpected pnpm project reference",
+        )
+        link.unlink()
+    bundle = sources / f"{plan['package']}-{plan['version']}-frontend.tar.gz"
+    deterministic_tar(bundle, [store, cache, licenses])
+    service = sources / f"{plan['package']}.service"
+    shutil.copy2(ROOT / "packaging" / service.name, service)
+    plan.update(
+        {
+            "frontend": True,
+            "pnpm_version": frontend["pnpm"],
+            "pnpm_sha256": repo.sha256(pnpm),
+            "pnpm_integrity": integrity,
+            "frontend_sha256": repo.sha256(bundle),
+            "service_sha256": repo.sha256(service),
+            "frontend_manifests": {str(p.relative_to(source_dir)): h for p, h in manifests.items()},
+        }
+    )
+
+
 def toolchain_source(network, toolchain, plan, sources):
     version = toolchain["version"]
     repo.require(
@@ -355,7 +551,9 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         plan["source_file"] = archive.name
         plan["vendor_file"] = vendor.name
         toolchain_source(network, config["toolchain"], plan, sources)
-        # No generated binaries or dependency caches enter the source package.
+        if recipe.get("frontend"):
+            frontend_sources(network, config, recipe, plan, source_dir, sources)
+        # Exclude generated application files and the Go dependency cache from the SRPM.
         shutil.rmtree(sources / "unpacked")
         provenance = sources / f"{package}-source-provenance.json"
         provenance.write_text(repo.canonical(plan))
@@ -399,7 +597,14 @@ def build_local(output):
     plan = json.loads((output / "plan.json").read_text())
     srpm = output / plan["srpm"]
     repo.verify_checksum(srpm, plan["srpm_sha256"])
-    repo.run(["rpmbuild", "--define", f"_topdir {output.resolve()}", "--rebuild", srpm.resolve()])
+    result = subprocess.run(
+        ["rpmbuild", "--define", f"_topdir {output.resolve()}", "--rebuild", str(srpm.resolve())],
+        text=True,
+        capture_output=True,
+        timeout=3600,
+        check=False,
+    )
+    repo.require(result.returncode == 0, f"rpmbuild failed:\n{result.stdout}\n{result.stderr}")
     packages = list((output / "RPMS").rglob("*.rpm"))
     repo.require(len(packages) == 1, "Expected one native binary RPM")
     metadata = repo.run(["rpm", "-qp", "--qf", "%{NAME} %{VERSION} %{ARCH}\n", packages[0]])
@@ -427,7 +632,15 @@ def test_install(output):
         env = {
             k: v
             for k, v in os.environ.items()
-            if k not in ("COPR_CONFIG", "RPM_SIGNING_KEY", "RPM_SIGNING_PASSPHRASE")
+            if k
+            not in (
+                "COPR_CONFIG",
+                "RPM_SIGNING_KEY",
+                "RPM_SIGNING_PASSPHRASE",
+                "GH_TOKEN",
+                "GITHUB_TOKEN",
+                "ACTIONS_RUNTIME_TOKEN",
+            )
         }
         env.update({"GNUPGHOME": str(home), "LC_ALL": "C"})
         try:
@@ -482,16 +695,32 @@ def test_install(output):
                 "Test signature invalid",
             )
             repo.run(["rpm", "--root", root, "--install", signed])
-            version = repo.run([root / "usr/bin" / plan["package"], "version"], env=env)
-            repo.require(
-                f"mkbrr version: {plan['version']}" in version, "Installed binary version mismatch"
-            )
+            for binary in plan.get("binaries", [plan["package"]]):
+                if binary != plan["package"]:
+                    # autobrrctl's version command also contacts the upstream update API.
+                    repo.run([root / "usr/bin" / binary, "--help"], env=env)
+                    continue
+                version = repo.run([root / "usr/bin" / binary, "version"], env=env)
+                repo.require(
+                    re.search(rf"(?<![\d.])v?{re.escape(plan['version'])}(?![\d.])", version),
+                    "Installed binary version mismatch",
+                )
             license_dir = root / "usr/share/licenses" / plan["package"]
             repo.require(
                 all((license_dir / name).is_file() for name in ("LICENSE", "GOLANG-LICENSE")),
                 "Installed license notices missing",
             )
             repo.require((license_dir / "vendor-licenses").is_dir(), "Dependency notices missing")
+            if plan.get("frontend"):
+                repo.require(
+                    (license_dir / "frontend-licenses/packages.json").is_file(),
+                    "Frontend notices missing",
+                )
+                repo.require(
+                    (root / "usr/lib/systemd/user" / f"{plan['package']}.service").is_file(),
+                    "User service missing",
+                )
+                smoke_server(root, plan["package"], env, work)
             LOG.info("Signed test installation passed: %s", version.strip().splitlines()[0])
         finally:
             subprocess.run(
@@ -500,6 +729,60 @@ def test_install(output):
                 check=False,
                 timeout=30,
             )
+
+
+def smoke_server(root, package, env, work):
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        port = sock.getsockname()[1]
+    config = work / "config"
+    config.mkdir()
+    options = (
+        ["serve", "--config", str(config)]
+        if package == "autobrr"
+        else ["serve", "--config-dir", str(config), "--data-dir", str(work / "data")]
+    )
+    env = {**env, f"{package.upper()}__HOST": "127.0.0.1", f"{package.upper()}__PORT": str(port)}
+    with (work / "server.log").open("w+") as log:
+        process = subprocess.Popen(
+            [str(root / "usr/bin" / package), *options],
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+        )
+        try:
+            deadline = time.monotonic() + 45
+            while True:
+                repo.require(process.poll() is None, f"{package} exited before serving its web UI")
+                try:
+                    with urllib.request.urlopen(f"http://127.0.0.1:{port}/", timeout=2) as response:
+                        html = response.read().decode()
+                    break
+                except (urllib.error.URLError, TimeoutError):
+                    repo.require(time.monotonic() < deadline, f"{package} web UI startup timed out")
+                    time.sleep(0.2)
+            repo.require("<html" in html.lower(), "Built web UI is not served")
+            assets = re.findall(r'(?:src|href)="([^" ]+\.(?:js|css))"', html)
+            repo.require(assets, "Built web UI has no JavaScript/CSS assets")
+            for asset in assets:
+                repo.require(
+                    asset.startswith(("/", "./")) and not asset.startswith("//"),
+                    "Unexpected external web UI asset",
+                )
+                url = f"http://127.0.0.1:{port}/" + asset.removeprefix("./").lstrip("/")
+                with urllib.request.urlopen(url, timeout=5) as response:
+                    repo.require(
+                        response.status == 200 and len(response.read()) > 0,
+                        "Built web UI asset is missing",
+                    )
+            LOG.info("Live %s web UI and %s local assets passed", package, len(assets))
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=15)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def submit(output, destination, config_path, force=False, client=None):
@@ -547,7 +830,10 @@ def initialize(config_path, github_repository=None):
         enable_net=False,
         exist_ok=True,
         description="Unofficial source-built autobrr RPMs. Not affiliated with autobrr.",
-        instructions=f"sudo dnf copr enable {owner}/{project}\nsudo dnf install mkbrr",
+        instructions=(
+            f"sudo dnf copr enable {owner}/{project}\n"
+            f"sudo dnf install {' '.join(config['packages'])}"
+        ),
     )
     check_project(client, owner, project, config["chroots"])
     if github_repository:

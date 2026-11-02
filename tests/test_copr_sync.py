@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import io
 import json
@@ -38,11 +39,11 @@ def client_with(builds):
 
 
 class FakeSource:
-    def __init__(self, extra=None, module="github.com/autobrr/mkbrr", go="1.27.0"):
+    def __init__(self, extra=None, module="github.com/autobrr/mkbrr", go="1.27.0", replace=""):
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w:gz") as tar:
             files = {
-                "go.mod": f"module {module}\n\ngo {go}\n",
+                "go.mod": f"module {module}\n\ngo {go}\n{replace}",
                 "go.sum": "fixture\n",
                 "README.md": "either version 2 of the License, or any later version",
                 "LICENSE": "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n",
@@ -92,6 +93,32 @@ class SourceTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 with self.assertRaises(repo.InvalidRepository):
                     copr.upstream_source(network, "mkbrr", recipe, Path(directory) / "sources")
+
+    def test_only_exact_reviewed_module_replacements_allowed(self):
+        _, recipe = copr.settings("autobrr")
+        replacement = recipe["module_replacements"][0]
+        fixture_recipe = {
+            **recipe,
+            "module": "github.com/autobrr/mkbrr",
+            "license_markers": ["any later version"],
+        }
+        for line in (replacement, replacement.replace("530e06346d7d", "aaaaaaaaaaaa"), ""):
+            with tempfile.TemporaryDirectory() as directory:
+                if line == replacement:
+                    copr.upstream_source(
+                        FakeSource(replace=line),
+                        "mkbrr",
+                        fixture_recipe,
+                        Path(directory) / "sources",
+                    )
+                else:
+                    with self.assertRaisesRegex(repo.InvalidRepository, "module replacements"):
+                        copr.upstream_source(
+                            FakeSource(replace=line),
+                            "mkbrr",
+                            fixture_recipe,
+                            Path(directory) / "sources",
+                        )
 
     def test_source_path_traversal_rejected(self):
         _, recipe = copr.settings()
@@ -228,6 +255,173 @@ class SourceTests(unittest.TestCase):
                 with self.assertRaises(repo.InvalidRepository):
                     copr.prepare("mkbrr", output, network=FakeSource())
             self.assertEqual((output / "keep").read_text(), "last good package")
+
+
+class FrontendTests(unittest.TestCase):
+    def test_cold_offline_metadata_preserves_full_registry_record(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            abbreviated = cache / "v11/metadata/registry.npmjs.org/@scope/package.jsonl"
+            abbreviated.parent.mkdir(parents=True)
+            abbreviated.write_text("fixture\n")
+            metadata = {
+                "name": "@scope/package",
+                "versions": {
+                    "1.0.0": {
+                        "dist": {
+                            "integrity": "fixture",
+                            "attestations": {"provenance": {"predicateType": "fixture"}},
+                        }
+                    }
+                },
+                "time": {"1.0.0": "2026-01-01"},
+            }
+            network = Mock()
+            network.download.side_effect = lambda url, path, **kw: path.write_text(
+                json.dumps(metadata)
+            )
+            copr.complete_pnpm_metadata(network, cache)
+            full = cache / "v11/metadata-full/registry.npmjs.org/@scope/package.jsonl"
+            self.assertEqual(json.loads(full.read_text().splitlines()[1]), metadata)
+            self.assertIn("@scope%2Fpackage", network.download.call_args.args[0])
+            network.reset_mock()
+            copr.complete_pnpm_metadata(network, cache)
+            network.download.assert_not_called()
+
+    def test_incomplete_offline_metadata_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            abbreviated = cache / "v11/metadata/registry.npmjs.org/fixture.jsonl"
+            abbreviated.parent.mkdir(parents=True)
+            abbreviated.touch()
+            network = Mock()
+            network.download.side_effect = lambda url, path, **kw: path.write_text(
+                '{"name":"wrong","versions":{},"time":{}}'
+            )
+            with self.assertRaisesRegex(repo.InvalidRepository, "Incomplete npm registry metadata"):
+                copr.complete_pnpm_metadata(network, cache)
+
+    def fixture(self, root, license="MIT"):
+        config, recipe = copr.settings("autobrr")
+        tool = io.BytesIO()
+        with tarfile.open(fileobj=tool, mode="w:gz") as archive:
+            content = b"MIT license fixture"
+            info = tarfile.TarInfo("package/LICENSE")
+            info.size = len(content)
+            archive.addfile(info, io.BytesIO(content))
+        archive_bytes = tool.getvalue()
+        integrity = "sha512-" + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
+        recipe = {**recipe, "frontend": {**recipe["frontend"], "integrity": integrity}}
+        source = root / "source"
+        web = source / "web"
+        web.mkdir(parents=True)
+        (web / "package.json").write_text(
+            json.dumps({"packageManager": "pnpm@11.24.0", "engines": {"node": ">=24.0"}})
+        )
+        (web / "pnpm-lock.yaml").write_text("fixture lockfile\n")
+        package = web / "node_modules/.pnpm/fixture@1.0.0/node_modules/fixture"
+        package.mkdir(parents=True)
+        (package / "package.json").write_text(
+            json.dumps({"name": "fixture", "version": "1.0.0", "license": license})
+        )
+        (package / "LICENSE").write_text("MIT license fixture")
+        sources = root / "SOURCES"
+        sources.mkdir()
+        network = Mock()
+        network.download.side_effect = lambda url, path, **kw: path.write_bytes(archive_bytes)
+        return network, config, recipe, source, sources
+
+    def test_frontend_inputs_verified_and_credentials_excluded(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                copr.subprocess,
+                "run",
+                return_value=types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ) as run,
+            patch.dict(
+                os.environ, {"COPR_CONFIG": "private fixture", "GH_TOKEN": "private fixture"}
+            ),
+        ):
+            network, config, recipe, source, sources = self.fixture(Path(directory))
+            plan = {"package": "autobrr", "version": "1.2.3"}
+            copr.frontend_sources(network, config, recipe, plan, source, sources)
+            self.assertTrue(plan["frontend"])
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                self.assertIn("--ignore-scripts", call.args[0])
+                self.assertIn("--frozen-lockfile", call.args[0])
+                self.assertIn("--cpu=arm64", call.args[0])
+                self.assertNotIn("COPR_CONFIG", call.kwargs["env"])
+                self.assertNotIn("GH_TOKEN", call.kwargs["env"])
+            bundle = sources / "autobrr-1.2.3-frontend.tar.gz"
+            repo.verify_checksum(bundle, plan["frontend_sha256"])
+            with tarfile.open(bundle) as archive:
+                self.assertIn("frontend-licenses/fixture/1.0.0/LICENSE", archive.getnames())
+                self.assertIn("pnpm-store", archive.getnames())
+                self.assertIn("pnpm-cache", archive.getnames())
+
+    def test_unknown_frontend_license_rejected(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(
+                copr.subprocess,
+                "run",
+                return_value=types.SimpleNamespace(returncode=0, stdout="", stderr=""),
+            ),
+        ):
+            network, config, recipe, source, sources = self.fixture(Path(directory), "UNLICENSED")
+            with self.assertRaisesRegex(repo.InvalidRepository, "Review frontend license"):
+                copr.frontend_sources(
+                    network,
+                    config,
+                    recipe,
+                    {"package": "autobrr", "version": "1.2.3"},
+                    source,
+                    sources,
+                )
+
+    def test_changed_pnpm_pin_or_checksum_never_executed(self):
+        for kind in ("version", "checksum"):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(copr.subprocess, "run") as run,
+            ):
+                network, config, recipe, source, sources = self.fixture(Path(directory))
+                if kind == "version":
+                    (source / "web/package.json").write_text(
+                        json.dumps({"packageManager": "pnpm@99.0.0", "engines": {"node": ">=24.0"}})
+                    )
+                else:
+                    recipe["frontend"]["integrity"] = "sha512-" + "A" * 86 + "=="
+                with self.assertRaises(repo.InvalidRepository):
+                    copr.frontend_sources(
+                        network,
+                        config,
+                        recipe,
+                        {"package": "autobrr", "version": "1.2.3"},
+                        source,
+                        sources,
+                    )
+                run.assert_not_called()
+
+    def test_web_recipes_build_both_layers_offline_and_ship_user_services(self):
+        for package in ("autobrr", "qui"):
+            _, recipe = copr.settings(package)
+            spec = (copr.ROOT / recipe["spec"]).read_text()
+            for value in (
+                "install --offline --frozen-lockfile --ignore-scripts",
+                "--config.cache-dir=",
+                "--dir web run build",
+                "go build -mod=vendor",
+                "go test -mod=vendor -count=1 -short",
+                "%{_userunitdir}",
+            ):
+                self.assertIn(value, spec)
+            unit = (copr.ROOT / "packaging" / f"{package}.service").read_text()
+            self.assertIn("NoNewPrivileges=true", unit)
+            self.assertNotIn("User=root", unit)
+            self.assertIn(f"ExecStart=/usr/bin/{package} serve", unit)
 
 
 class CoprStateTests(unittest.TestCase):

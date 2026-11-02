@@ -1,0 +1,118 @@
+%global debug_package %{nil}
+%global upstream_commit @COMMIT@
+
+Name:           @PACKAGE@
+Version:        @VERSION@
+Release:        @RELEASE@%{?dist}
+Summary:        @SUMMARY@
+License:        @LICENSE@
+URL:            https://github.com/autobrr/%{name}
+Source0:        https://codeload.github.com/autobrr/%{name}/tar.gz/%{upstream_commit}#/%{name}-%{upstream_commit}.tar.gz
+Source1:        %{name}-%{version}-vendor.tar.gz
+Source2:        %{name}-source-provenance.json
+Source3:        https://go.dev/dl/go@TOOLCHAIN_VERSION@.src.tar.gz
+Source4:        https://registry.npmjs.org/pnpm/-/pnpm-@PNPM_VERSION@.tgz
+Source5:        %{name}-%{version}-frontend.tar.gz
+Source6:        %{name}.service
+
+%if 0%{?fedora} == 44
+BuildRequires:  golang >= @BOOTSTRAP_VERSION@
+%else
+BuildRequires:  golang >= @GO_VERSION@
+%endif
+BuildRequires:  nodejs24
+BuildRequires:  systemd-rpm-macros
+BuildRequires:  bash
+BuildRequires:  coreutils
+BuildRequires:  tar
+BuildRequires:  gzip
+ExclusiveArch:  x86_64 aarch64
+
+%description
+@SUMMARY@.
+Unofficial community build from unmodified upstream Go and frontend source.
+Includes an optional systemd user service; installation does not start it.
+
+%prep
+printf '%s  %s\n' '@SOURCE_SHA256@' '%{SOURCE0}' | sha256sum --check --status
+printf '%s  %s\n' '@VENDOR_SHA256@' '%{SOURCE1}' | sha256sum --check --status
+printf '%s  %s\n' '@TOOLCHAIN_SHA256@' '%{SOURCE3}' | sha256sum --check --status
+printf '%s  %s\n' '@PNPM_SHA256@' '%{SOURCE4}' | sha256sum --check --status
+printf '%s  %s\n' '@FRONTEND_SHA256@' '%{SOURCE5}' | sha256sum --check --status
+printf '%s  %s\n' '@SERVICE_SHA256@' '%{SOURCE6}' | sha256sum --check --status
+%autosetup -n %{name}-%{upstream_commit}
+tar -xzf %{SOURCE1}
+tar -xzf %{SOURCE5}
+mkdir .pnpm-tool .build-bin
+tar -xzf %{SOURCE4} -C .pnpm-tool
+ln -s /usr/bin/node-24 .build-bin/node
+cp %{SOURCE2} source-provenance.json
+%if 0%{?fedora} == 44
+mkdir .go-toolchain
+tar -xzf %{SOURCE3} -C .go-toolchain
+%endif
+
+%build
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+export SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@
+export CI=true PATH="$PWD/.build-bin:$PATH"
+%if 0%{?fedora} == 44
+export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+(cd .go-toolchain/go/src && ./make.bash)
+export PATH="$PWD/.go-toolchain/go/bin:$PATH"
+go version | grep -F 'go@TOOLCHAIN_VERSION@ '
+cp .go-toolchain/go/LICENSE GOLANG-LICENSE
+%else
+cp %{_licensedir}/golang/LICENSE GOLANG-LICENSE
+%endif
+node --version | grep -E '^v24\.'
+node .pnpm-tool/package/bin/pnpm.cjs --dir web install --offline --frozen-lockfile --ignore-scripts \
+  --store-dir "$PWD/pnpm-store" --config.cache-dir="$PWD/pnpm-cache"
+node .pnpm-tool/package/bin/pnpm.cjs --dir web run build
+test -s web/dist/index.html
+%if "%{name}" == "qui"
+mkdir -p internal/web/dist
+cp -a web/dist/. internal/web/dist/
+go build -mod=vendor -trimpath -buildvcs=false -pgo=off \
+  -ldflags '-s -w -B gobuildid -X github.com/autobrr/qui/internal/buildinfo.Version=%{version} -X github.com/autobrr/qui/internal/buildinfo.Commit=%{upstream_commit} -X github.com/autobrr/qui/internal/buildinfo.Date=@BUILD_TIME@' \
+  -o qui ./cmd/qui
+%else
+for binary in autobrr autobrrctl; do
+  go build -mod=vendor -trimpath -buildvcs=false -pgo=off \
+    -ldflags '-s -w -B gobuildid -X main.version=%{version} -X main.commit=%{upstream_commit} -X main.date=@BUILD_TIME@' \
+    -o "$binary" "./cmd/$binary"
+done
+%endif
+
+%install
+install -Dpm0755 %{name} %{buildroot}%{_bindir}/%{name}
+install -Dpm0644 %{SOURCE6} %{buildroot}%{_userunitdir}/%{name}.service
+%if "%{name}" == "autobrr"
+install -Dpm0755 autobrrctl %{buildroot}%{_bindir}/autobrrctl
+install -Dpm0644 docs/man/autobrr.1 %{buildroot}%{_mandir}/man1/autobrr.1
+%endif
+
+%check
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+export CI=true PATH="$PWD/.build-bin:$PATH"
+%if 0%{?fedora} == 44
+export PATH="$PWD/.go-toolchain/go/bin:$PATH"
+%endif
+go test -mod=vendor -count=1 -short ./...
+./%{name} version | grep -F '%{version}'
+
+%files
+%license LICENSE GOLANG-LICENSE vendor-licenses frontend-licenses
+%doc README.md source-provenance.json
+%{_bindir}/%{name}
+%{_userunitdir}/%{name}.service
+%if "%{name}" == "autobrr"
+%{_bindir}/autobrrctl
+%{_mandir}/man1/autobrr.1*
+%endif
+
+%changelog
+* @CHANGELOG_DATE@ Community RPM maintainers - %{version}-@RELEASE@
+- Build unmodified upstream Go and frontend source with offline dependencies.

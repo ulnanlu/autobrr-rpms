@@ -1,0 +1,14 @@
+[Unit]
+Description=autobrr download automation
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/autobrr serve --config=%h/.config/autobrr
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+UMask=0077
+
+[Install]
+WantedBy=default.target
