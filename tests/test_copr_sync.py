@@ -15,11 +15,20 @@ from unittest.mock import Mock, patch
 from scripts import common as repo
 from scripts import copr_sync as copr
 
-CHROOTS = ["fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64"]
+CHROOTS = [
+    "fedora-44-x86_64",
+    "fedora-44-aarch64",
+    "fedora-45-x86_64",
+    "fedora-45-aarch64",
+    "epel-9-x86_64",
+    "epel-9-aarch64",
+    "epel-10-x86_64",
+    "epel-10-aarch64",
+]
 COMMIT = "a" * 40
 
 
-def build(state="succeeded", version="1.2.3-2", chroots=None):
+def build(state="succeeded", version="1.2.3-3", chroots=None):
     return {
         "id": 42,
         "state": state,
@@ -39,17 +48,27 @@ def client_with(builds):
 
 
 class FakeSource:
-    def __init__(self, extra=None, module="github.com/autobrr/mkbrr", go="1.27.0", replace=""):
+    def __init__(
+        self,
+        extra=None,
+        module="github.com/autobrr/mkbrr",
+        go="1.27.0",
+        replace="",
+        releases=None,
+        license_file="LICENSE",
+        readme=None,
+    ):
+        self.releases = releases or [{"tag_name": "v1.2.3", "draft": False, "prerelease": False}]
         archive = io.BytesIO()
         with tarfile.open(fileobj=archive, mode="w:gz") as tar:
             files = {
                 "go.mod": f"module {module}\n\ngo {go}\n{replace}",
                 "go.sum": "fixture\n",
-                "README.md": "either version 2 of the License, or any later version",
-                "LICENSE": "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n",
+                "README.md": readme or "either version 2 of the License, or any later version",
+                license_file: "GNU GENERAL PUBLIC LICENSE\nVersion 2, June 1991\n",
             }
             for name, content in files.items():
-                member = tarfile.TarInfo(f"mkbrr-{COMMIT}/{name}")
+                member = tarfile.TarInfo(f"{module.rsplit('/', 1)[-1]}-{COMMIT}/{name}")
                 member.size = len(content.encode())
                 tar.addfile(member, io.BytesIO(content.encode()))
             if extra:
@@ -58,7 +77,7 @@ class FakeSource:
 
     def json(self, url):
         if "/releases?" in url:
-            return [{"tag_name": "v1.2.3", "draft": False, "prerelease": False}]
+            return self.releases
         return {"sha": COMMIT, "commit": {"committer": {"date": "2026-01-01T00:00:00Z"}}}
 
     def download(self, url, path, **kwargs):
@@ -87,12 +106,92 @@ class SourceTests(unittest.TestCase):
             repo.verify_checksum(archive, plan["source_sha256"])
             self.assertTrue((source / "LICENSE").is_file())
 
+    def test_unreviewed_distro_or_architecture_is_rejected(self):
+        config, _ = copr.settings()
+        for chroot in ("epel-8-x86_64", "epel-11-aarch64", "fedora-46-x86_64", "epel-9-ppc64le"):
+            with patch.object(
+                Path, "read_text", return_value=json.dumps({**config, "chroots": [chroot]})
+            ):
+                with self.assertRaisesRegex(repo.InvalidRepository, "Unreviewed COPR build target"):
+                    copr.settings()
+
     def test_changed_module_or_malformed_go_version_rejected(self):
         _, recipe = copr.settings()
         for network in (FakeSource(module="example.org/other"), FakeSource(go="garbage")):
             with tempfile.TemporaryDirectory() as directory:
                 with self.assertRaises(repo.InvalidRepository):
                     copr.upstream_source(network, "mkbrr", recipe, Path(directory) / "sources")
+
+    def test_only_explicit_historical_nonsemver_tags_are_excluded(self):
+        _, recipe = copr.settings()
+        reviewed = {**recipe, "ignored_release_tags": ["0.0.4-hotfix1"]}
+        releases = [{"tag_name": "v1.2.3"}, {"tag_name": "0.0.4-hotfix1"}]
+        with tempfile.TemporaryDirectory() as directory:
+            plan, _, _ = copr.upstream_source(
+                FakeSource(releases=releases), "mkbrr", reviewed, Path(directory) / "sources"
+            )
+            self.assertEqual(plan["version"], "1.2.3")
+        for rows, source_recipe in (
+            (releases, recipe),
+            ([*releases, {"tag_name": "new-unreviewed-hotfix"}], reviewed),
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(repo.InvalidRepository, "Unexpected stable version"):
+                    copr.upstream_source(
+                        FakeSource(releases=rows),
+                        "mkbrr",
+                        source_recipe,
+                        Path(directory) / "sources",
+                    )
+        config, _ = copr.settings()
+        config["packages"]["mkbrr"]["ignored_release_tags"] = ["v1.2.3"]
+        with patch.object(Path, "read_text", return_value=json.dumps(config)):
+            with self.assertRaisesRegex(repo.InvalidRepository, "non-semver"):
+                copr.settings()
+
+    def test_new_cli_recipes_preserve_licenses_and_upstream_build_entrypoints(self):
+        for package in ("tqm", "sfvbrr"):
+            _, recipe = copr.settings(package)
+            network = FakeSource(
+                module=recipe["module"],
+                replace="\n".join(recipe.get("module_replacements", [])),
+                license_file=recipe.get("license_file", "LICENSE"),
+                readme="License-GPL%203" if package == "tqm" else None,
+            )
+            with tempfile.TemporaryDirectory() as directory:
+                plan, _, _ = copr.upstream_source(
+                    network, package, recipe, Path(directory) / "sources"
+                )
+                plan.update(
+                    {
+                        "vendor_sha256": "b" * 64,
+                        "toolchain_version": "1.27.3",
+                        "bootstrap_version": "1.26.0",
+                        "toolchain_sha256": "c" * 64,
+                    }
+                )
+                spec = copr.render_spec(recipe, plan)
+                self.assertIn(
+                    f"%license {plan['license_file']} GOLANG-LICENSE vendor-licenses", spec
+                )
+                self.assertIn("go test -mod=vendor -count=1 -short ./...", spec)
+                self.assertIn("CGO_ENABLED=0", spec)
+                self.assertIn("./cmd/tqm", spec)
+                self.assertIn("-X github.com/autobrr/sfvbrr/cmd.version=", spec)
+                self.assertNotIn("@LICENSE_FILE@", spec)
+
+    def test_missing_or_unsafe_upstream_license_is_rejected(self):
+        _, recipe = copr.settings()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(repo.InvalidRepository, "Missing upstream license"):
+                copr.upstream_source(
+                    FakeSource(license_file="OTHER"), "mkbrr", recipe, Path(directory) / "sources"
+                )
+        config, _ = copr.settings()
+        config["packages"]["mkbrr"]["license_file"] = "../LICENSE"
+        with patch.object(Path, "read_text", return_value=json.dumps(config)):
+            with self.assertRaisesRegex(repo.InvalidRepository, "Unsafe filename"):
+                copr.settings()
 
     def test_only_exact_reviewed_module_replacements_allowed(self):
         _, recipe = copr.settings("autobrr")
@@ -257,7 +356,58 @@ class SourceTests(unittest.TestCase):
             self.assertEqual((output / "keep").read_text(), "last good package")
 
 
+class CliTests(unittest.TestCase):
+    def test_tqm_verification_never_executes_cleanup(self):
+        with patch.object(repo, "run") as run:
+            copr.smoke_cli(Path("/isolated"), "tqm", {}, Path("/fixture"))
+        run.assert_called_once_with([Path("/isolated/usr/bin/tqm"), "clean", "--help"], env={})
+
+    def test_sfvbrr_must_accept_valid_and_reject_corrupt_checksums(self):
+        for status in (1, 0, -11):
+            with (
+                tempfile.TemporaryDirectory() as directory,
+                patch.object(repo, "run") as valid,
+                patch.object(
+                    copr.subprocess, "run", return_value=types.SimpleNamespace(returncode=status)
+                ),
+            ):
+                if status == 1:
+                    copr.smoke_cli(Path("/isolated"), "sfvbrr", {}, Path(directory))
+                else:
+                    with self.assertRaisesRegex(repo.InvalidRepository, "corrupt payload"):
+                        copr.smoke_cli(Path("/isolated"), "sfvbrr", {}, Path(directory))
+                self.assertEqual(valid.call_args.args[0][1], "sfv")
+
+
 class FrontendTests(unittest.TestCase):
+    def test_node24_resolves_parallel_and_el9_module_binaries(self):
+        for commands, expected in (
+            (["/usr/bin/node-24"], "/usr/bin/node-24"),
+            ([None, "/usr/bin/node"], "/usr/bin/node"),
+        ):
+            with (
+                patch.object(copr.shutil, "which", side_effect=commands),
+                patch.object(repo, "run", return_value="v24.21.0\n") as run,
+            ):
+                self.assertEqual(copr.frontend_node(), expected)
+                run.assert_called_once_with([expected, "--version"])
+
+    def test_missing_or_unsupported_node_fails_before_pnpm(self):
+        with (
+            patch.object(copr.shutil, "which", return_value=None),
+            patch.object(repo, "run") as run,
+        ):
+            with self.assertRaisesRegex(repo.InvalidRepository, "Install Node.js 24"):
+                copr.frontend_node()
+            run.assert_not_called()
+        for version in ("v22.23.2", "v25.0.0", "garbage"):
+            with (
+                patch.object(copr.shutil, "which", return_value="/usr/bin/node"),
+                patch.object(repo, "run", return_value=version),
+            ):
+                with self.assertRaisesRegex(repo.InvalidRepository, "requires Node.js 24"):
+                    copr.frontend_node()
+
     def test_cold_offline_metadata_preserves_full_registry_record(self):
         with tempfile.TemporaryDirectory() as directory:
             cache = Path(directory)
@@ -302,6 +452,9 @@ class FrontendTests(unittest.TestCase):
                 copr.complete_pnpm_metadata(network, cache)
 
     def fixture(self, root, license="MIT"):
+        node = patch.object(copr, "frontend_node", return_value="node-24")
+        node.start()
+        self.addCleanup(node.stop)
         config, recipe = copr.settings("autobrr")
         tool = io.BytesIO()
         with tarfile.open(fileobj=tool, mode="w:gz") as archive:
@@ -416,6 +569,9 @@ class FrontendTests(unittest.TestCase):
                 "go build -mod=vendor",
                 "go test -mod=vendor -count=1 -short",
                 "%{_userunitdir}",
+                "%if 0%{?rhel} == 9",
+                "ln -s /usr/bin/node .build-bin/node",
+                "%if 0%{?fedora} == 44 || 0%{?rhel}",
             ):
                 self.assertIn(value, spec)
             if package == "qui":
@@ -441,29 +597,29 @@ class CoprStateTests(unittest.TestCase):
     def test_matching_success_is_idempotent(self):
         client = client_with([build()])
         self.assertEqual(
-            copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 2, CHROOTS), 42
+            copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 3, CHROOTS), 42
         )
         client.build_proxy.create_from_file.assert_not_called()
 
     def test_other_versions_or_incomplete_architecture_do_not_skip(self):
-        for row in (build(version="1.2.2-2"), build(chroots=[CHROOTS[0]])):
+        for row in (build(version="1.2.2-3"), build(chroots=[CHROOTS[0]])):
             self.assertIsNone(
                 copr.current_build(
-                    client_with([row]), "owner", "project", "mkbrr", "1.2.3", 2, CHROOTS
+                    client_with([row]), "owner", "project", "mkbrr", "1.2.3", 3, CHROOTS
                 )
             )
 
     def test_failed_latest_attempt_is_retried(self):
         client = client_with([build("failed"), build()])
         self.assertIsNone(
-            copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 2, CHROOTS)
+            copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 3, CHROOTS)
         )
 
     def test_active_build_is_watched_not_duplicated(self):
         client = client_with([build("running")])
         with patch.object(copr, "watch_build") as watch:
             self.assertEqual(
-                copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 2, CHROOTS), 42
+                copr.current_build(client, "owner", "project", "mkbrr", "1.2.3", 3, CHROOTS), 42
             )
         watch.assert_called_once_with(client, 42)
         client.build_proxy.create_from_file.assert_not_called()
@@ -513,7 +669,7 @@ class CoprStateTests(unittest.TestCase):
             artifact.write_bytes(b"corrupted")
             plan = {
                 "package": "mkbrr",
-                "release": 2,
+                "release": 3,
                 "chroots": CHROOTS,
                 "srpm": artifact.name,
                 "srpm_sha256": "a" * 64,
@@ -533,7 +689,7 @@ class CoprStateTests(unittest.TestCase):
             plan = {
                 "package": "mkbrr",
                 "version": "1.2.3",
-                "release": 2,
+                "release": 3,
                 "chroots": CHROOTS,
                 "srpm": artifact.name,
                 "srpm_sha256": repo.sha256(artifact),

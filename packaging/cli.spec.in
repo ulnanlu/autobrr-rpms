@@ -1,0 +1,89 @@
+%global debug_package %{nil}
+%global upstream_commit @COMMIT@
+%if 0%{?fedora} == 44 || 0%{?rhel}
+%global bootstrap_go 1
+%else
+%global bootstrap_go 0
+%endif
+
+Name:           @PACKAGE@
+Version:        @VERSION@
+Release:        @RELEASE@%{?dist}
+Summary:        @SUMMARY@
+License:        @LICENSE@
+URL:            https://github.com/autobrr/%{name}
+Source0:        https://codeload.github.com/autobrr/%{name}/tar.gz/%{upstream_commit}#/%{name}-%{upstream_commit}.tar.gz
+Source1:        %{name}-%{version}-vendor.tar.gz
+Source2:        %{name}-source-provenance.json
+Source3:        https://go.dev/dl/go@TOOLCHAIN_VERSION@.src.tar.gz
+
+%if %{bootstrap_go}
+BuildRequires:  golang >= @BOOTSTRAP_VERSION@
+%else
+BuildRequires:  golang >= @GO_VERSION@
+%endif
+BuildRequires:  bash
+BuildRequires:  coreutils
+BuildRequires:  tar
+BuildRequires:  gzip
+ExclusiveArch:  x86_64 aarch64
+
+%description
+@SUMMARY@.
+Unofficial community build from unmodified upstream Go source.
+
+%prep
+printf '%s  %s\n' '@SOURCE_SHA256@' '%{SOURCE0}' | sha256sum --check --status
+printf '%s  %s\n' '@VENDOR_SHA256@' '%{SOURCE1}' | sha256sum --check --status
+printf '%s  %s\n' '@TOOLCHAIN_SHA256@' '%{SOURCE3}' | sha256sum --check --status
+%autosetup -n %{name}-%{upstream_commit}
+tar -xzf %{SOURCE1}
+cp %{SOURCE2} source-provenance.json
+%if %{bootstrap_go}
+mkdir .go-toolchain
+tar -xzf %{SOURCE3} -C .go-toolchain
+%endif
+
+%build
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+export SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@
+%if %{bootstrap_go}
+export GOROOT_BOOTSTRAP="$(go env GOROOT)"
+(cd .go-toolchain/go/src && ./make.bash)
+export PATH="$PWD/.go-toolchain/go/bin:$PATH"
+go version | grep -F 'go@TOOLCHAIN_VERSION@ '
+cp .go-toolchain/go/LICENSE GOLANG-LICENSE
+%else
+cp %{_licensedir}/golang/LICENSE GOLANG-LICENSE
+%endif
+%if "%{name}" == "tqm"
+go build -mod=vendor -trimpath -buildvcs=false -pgo=off \
+  -ldflags '-s -w -B gobuildid -X github.com/autobrr/tqm/pkg/runtime.Version=%{version} -X github.com/autobrr/tqm/pkg/runtime.GitCommit=%{upstream_commit} -X github.com/autobrr/tqm/pkg/runtime.Timestamp=@SOURCE_DATE_EPOCH@' \
+  -o tqm ./cmd/tqm
+%else
+go build -mod=vendor -trimpath -buildvcs=false -pgo=off \
+  -ldflags '-s -w -B gobuildid -X github.com/autobrr/sfvbrr/cmd.version=%{version} -X github.com/autobrr/sfvbrr/cmd.buildTime=@BUILD_TIME@' \
+  -o %{name} .
+%endif
+
+%install
+install -Dpm0755 %{name} %{buildroot}%{_bindir}/%{name}
+
+%check
+export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
+export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
+%if %{bootstrap_go}
+export PATH="$PWD/.go-toolchain/go/bin:$PATH"
+%endif
+go test -mod=vendor -count=1 -short ./...
+./%{name} version | grep -F '%{version}'
+
+%files
+%license @LICENSE_FILE@ GOLANG-LICENSE vendor-licenses
+%doc README.md source-provenance.json
+%{_bindir}/%{name}
+
+%changelog
+* @CHANGELOG_DATE@ Community RPM maintainers - %{version}-@RELEASE@
+- Build unmodified upstream Go source with offline dependencies.

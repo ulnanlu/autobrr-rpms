@@ -1,6 +1,9 @@
 {
   "project": "autobrr-rpms",
-  "chroots": ["fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64"],
+  "chroots": [
+    "fedora-44-x86_64", "fedora-44-aarch64", "fedora-45-x86_64", "fedora-45-aarch64",
+    "epel-9-x86_64", "epel-9-aarch64", "epel-10-x86_64", "epel-10-aarch64"
+  ],
   "toolchain": {
     "version": "1.27.3",
     "bootstrap_version": "1.26.0",
@@ -16,14 +19,14 @@
     "mkbrr": {
       "upstream": "autobrr/mkbrr",
       "module": "github.com/autobrr/mkbrr",
-      "release": 2,
+      "release": 3,
       "spec": "packaging/mkbrr.spec.in",
       "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0"
     },
     "autobrr": {
       "upstream": "autobrr/autobrr",
       "module": "github.com/autobrr/autobrr",
-      "release": 2,
+      "release": 3,
       "spec": "packaging/webapp.spec.in",
       "summary": "Download automation for torrents and Usenet",
       "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unlicense AND 0BSD AND BlueOak-1.0.0 AND CC-BY-4.0 AND CC0-1.0 AND MIT-0 AND Python-2.0",
@@ -38,7 +41,7 @@
     "qui": {
       "upstream": "autobrr/qui",
       "module": "github.com/autobrr/qui",
-      "release": 3,
+      "release": 4,
       "spec": "packaging/webapp.spec.in",
       "summary": "Self-hosted web interface for qBittorrent",
       "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0 AND Unlicense AND 0BSD AND BlueOak-1.0.0 AND CC-BY-4.0 AND CC0-1.0 AND MIT-0 AND Zlib",
@@ -48,6 +51,29 @@
         "pnpm": "11.1.2",
         "integrity": "sha512-QVocwll0cx51RVwUaDcb50xapft2IbUNQFbSIkUWCfEUEvI/1gLmFp8eBgRmZB95hZfhvpYaEGiINqZ7FlaUmQ=="
       }
+    },
+    "tqm": {
+      "upstream": "autobrr/tqm",
+      "module": "github.com/autobrr/tqm",
+      "release": 2,
+      "spec": "packaging/cli.spec.in",
+      "summary": "Manage torrent client queues",
+      "license": "GPL-3.0-only AND GPL-2.0-or-later AND Apache-2.0 AND BSD-2-Clause AND BSD-3-Clause AND ISC AND MIT AND MPL-2.0",
+      "license_file": "LICENSE.md",
+      "license_markers": ["License-GPL%203"]
+    },
+    "sfvbrr": {
+      "upstream": "autobrr/sfvbrr",
+      "module": "github.com/autobrr/sfvbrr",
+      "release": 2,
+      "spec": "packaging/cli.spec.in",
+      "summary": "Validate scene releases, SFV checksums and ZIP integrity",
+      "license": "GPL-2.0-or-later AND Apache-2.0 AND BSD-3-Clause AND MIT AND MPL-2.0",
+      "ignored_release_tags": ["0.0.4-hotfix1"],
+      "module_replacements": [
+        "replace github.com/ulikunitz/xz => github.com/ulikunitz/xz v0.5.15",
+        "replace github.com/moistari/rls => github.com/autobrr/rls v0.7.0"
+      ]
     }
   }
 }

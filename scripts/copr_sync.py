@@ -22,6 +22,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zlib
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 
@@ -50,12 +51,27 @@ def settings(package="mkbrr"):
         type(recipe["release"]) is int and recipe["release"] >= 2,
         "Packaging release must be >=2 to supersede upstream RPM release 1",
     )
+    repo.safe_name(recipe.get("license_file", "LICENSE"))
+    ignored_tags = recipe.get("ignored_release_tags", [])
+    repo.require(
+        isinstance(ignored_tags, list)
+        and all(
+            isinstance(tag, str)
+            and repo.SAFE_NAME.fullmatch(tag)
+            and not repo.VERSION.fullmatch(tag)
+            for tag in ignored_tags
+        ),
+        "Only explicitly reviewed non-semver release tags may be ignored",
+    )
     repo.require(
         config["chroots"] and len(config["chroots"]) == len(set(config["chroots"])),
         "Missing or duplicate COPR chroots",
     )
     repo.require(
-        all(re.fullmatch(r"fedora-\d+-(x86_64|aarch64)", c) for c in config["chroots"]),
+        all(
+            re.fullmatch(r"(?:fedora-(?:44|45)|epel-(?:9|10))-(?:x86_64|aarch64)", c)
+            for c in config["chroots"]
+        ),
         "Unreviewed COPR build target",
     )
     toolchain = config["toolchain"]
@@ -173,6 +189,7 @@ def upstream_source(network, package, recipe, directory):
             break
     else:
         raise repo.InvalidRepository("Upstream release pagination limit reached")
+    releases = [r for r in releases if r["tag_name"] not in recipe.get("ignored_release_tags", [])]
     release = repo.select_releases(releases, 1)[0]
     tag = release["tag_name"]
     commit = network.json(f"{api}/commits/{tag}")
@@ -219,6 +236,8 @@ def upstream_source(network, package, recipe, directory):
         replacements == recipe.get("module_replacements", []), "Review module replacements first"
     )
     readme = (source_dir / "README.md").read_text()
+    license_file = recipe.get("license_file", "LICENSE")
+    repo.require((source_dir / license_file).is_file(), "Missing upstream license notice")
     repo.require(
         all(
             marker in readme
@@ -241,6 +260,7 @@ def upstream_source(network, package, recipe, directory):
         "source_url": url,
         "source_sha256": repo.sha256(archive),
         "license": recipe["license"],
+        "license_file": license_file,
         "summary": recipe.get("summary", ""),
         "binaries": recipe.get("binaries", [package]),
     }
@@ -356,6 +376,16 @@ def complete_pnpm_metadata(network, cache):
         list(executor.map(download, missing))
 
 
+def frontend_node():
+    node = shutil.which("node-24") or shutil.which("node")
+    repo.require(node, "Install Node.js 24 before preparing frontend dependencies")
+    repo.require(
+        re.fullmatch(r"v24\.\d+\.\d+\s*", repo.run([node, "--version"])),
+        "Frontend preparation requires Node.js 24",
+    )
+    return node
+
+
 def frontend_sources(network, config, recipe, plan, source_dir, sources):
     frontend = recipe["frontend"]
     web = source_dir / "web"
@@ -399,7 +429,7 @@ def frontend_sources(network, config, recipe, plan, source_dir, sources):
         if k in ("PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR")
     }
     env.update({"HOME": str(home), "CI": "true"})
-    command = ["node-24", str(tool / "package/bin/pnpm.cjs"), "--dir", "web"]
+    command = [frontend_node(), str(tool / "package/bin/pnpm.cjs"), "--dir", "web"]
     options = [
         "--frozen-lockfile",
         "--ignore-scripts",
@@ -677,10 +707,12 @@ def test_install(output):
                     "rpmsign",
                     "--define",
                     "_openpgp_sign gpg",
-                    "--key-id",
-                    fingerprint,
-                    "--digest-algo",
-                    "sha256",
+                    "--define",
+                    f"_openpgp_sign_id {fingerprint}",
+                    "--define",
+                    f"_gpg_name {fingerprint}",
+                    "--define",
+                    "_gpg_digest_algo sha256",
                     "--resign",
                     signed,
                 ],
@@ -707,10 +739,15 @@ def test_install(output):
                 )
             license_dir = root / "usr/share/licenses" / plan["package"]
             repo.require(
-                all((license_dir / name).is_file() for name in ("LICENSE", "GOLANG-LICENSE")),
+                all(
+                    (license_dir / name).is_file()
+                    for name in (plan.get("license_file", "LICENSE"), "GOLANG-LICENSE")
+                ),
                 "Installed license notices missing",
             )
             repo.require((license_dir / "vendor-licenses").is_dir(), "Dependency notices missing")
+            if plan["package"] in ("tqm", "sfvbrr"):
+                smoke_cli(root, plan["package"], env, work)
             if plan.get("frontend"):
                 repo.require(
                     (license_dir / "frontend-licenses/packages.json").is_file(),
@@ -729,6 +766,34 @@ def test_install(output):
                 check=False,
                 timeout=30,
             )
+
+
+def smoke_cli(root, package, env, work):
+    binary = root / "usr/bin" / package
+    if package == "tqm":
+        # Never run a real cleanup or connect to a torrent client during installation tests.
+        repo.run([binary, "clean", "--help"], env=env)
+    elif package == "sfvbrr":
+        fixture = work / "checksum-fixture"
+        fixture.mkdir()
+        payload = fixture / "payload.bin"
+        payload.write_bytes(b"RPM checksum verification fixture\n")
+        checksum = zlib.crc32(payload.read_bytes())
+        (fixture / "fixture.sfv").write_text(f"payload.bin {checksum:08X}\n")
+        repo.run([binary, "sfv", fixture, "--json"], env=env)
+        payload.write_bytes(b"corrupted fixture\n")
+        result = subprocess.run(
+            [str(binary), "sfv", str(fixture), "--json"],
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+        repo.require(
+            result.returncode == 1, "sfvbrr did not report checksum failure for a corrupt payload"
+        )
+    LOG.info("Installed %s CLI smoke test passed", package)
 
 
 def smoke_server(root, package, env, work):

@@ -31,28 +31,43 @@ concurrency:
 
 jobs:
   source-build:
+    name: source-build (${{ matrix.distro.name }}, ${{ matrix.package }})
     strategy:
       fail-fast: false
       matrix:
-        fedora: ['44', '45']
-        package: [mkbrr, autobrr, qui]
+        distro:
+          - { name: fedora44, image: 'registry.fedoraproject.org/fedora:44', python: python3, node: nodejs24 }
+          - { name: fedora45, image: 'registry.fedoraproject.org/fedora:45', python: python3, node: nodejs24 }
+          - { name: el9, image: 'docker.io/library/almalinux:9', python: python3.12, node: nodejs }
+          - { name: el10, image: 'docker.io/library/almalinux:10', python: python3, node: nodejs24 }
+        package: [mkbrr, autobrr, qui, tqm, sfvbrr]
     runs-on: ubuntu-24.04
-    container: registry.fedoraproject.org/fedora:${{ matrix.fedora }}
-    timeout-minutes: 60
+    container: ${{ matrix.distro.image }}
+    timeout-minutes: 90
+    env:
+      PYTHON: ${{ matrix.distro.python }}
     steps:
       - name: Install source build tools
-        run: dnf -y install python3 golang nodejs24 systemd-rpm-macros rpm-build rpm-sign gnupg2 redhat-rpm-config git
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ '${{ matrix.distro.name }}' == el9 ]]; then
+            dnf -y install dnf-plugins-core
+            dnf config-manager --set-enabled crb
+            dnf -y module enable nodejs:24
+          fi
+          dnf -y install "$PYTHON" golang '${{ matrix.distro.node }}' systemd-rpm-macros rpm-build rpm-sign gnupg2 redhat-rpm-config git
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Unit tests
-        run: python3 -m unittest discover -s tests -v
+        run: '"$PYTHON" -m unittest discover -s tests -v'
       - name: Prepare unmodified upstream source and vendored dependencies
         env:
           GH_TOKEN: ${{ github.token }}
           PACKAGE: ${{ matrix.package }}
-        run: python3 scripts/copr_sync.py prepare --package "$PACKAGE"
+        run: '"$PYTHON" scripts/copr_sync.py prepare --package "$PACKAGE"'
       - name: Compile, run upstream tests, and install in a disposable root
         run: |
-          python3 scripts/copr_sync.py build
-          python3 scripts/copr_sync.py test-install
+          "$PYTHON" scripts/copr_sync.py build
+          "$PYTHON" scripts/copr_sync.py test-install

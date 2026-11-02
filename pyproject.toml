@@ -1,7 +1,7 @@
 [project]
 name = "autobrr-rpms"
 version = "1.0.0"
-description = "Unofficial source-built autobrr application RPMs for Fedora COPR"
+description = "Unofficial source-built autobrr application RPMs for Fedora and EL on COPR"
 requires-python = ">=3.11"
 dependencies = []
 

@@ -1,6 +1,6 @@
 # Maintenance
 
-Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on Fedora 44/45, x86_64/aarch64. COPR builds, signs, and hosts the packages; GitHub hosts packaging code only.
+Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on Fedora 44/45 and EL 9/10, x86_64/aarch64. COPR builds, signs, and hosts the packages; GitHub hosts packaging code only.
 
 ## Automation
 
@@ -12,9 +12,13 @@ Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on 
 - Build the original frontend and Go binaries offline, run upstream short tests, then test a disposable-key-signed installation and live web assets.
 - Submit SRPMs to COPR, which builds both architectures natively, signs the RPMs, and hosts binaries and sources.
 
-Fedora 44 bootstraps checksum-pinned Go 1.27.3 source with its distribution compiler. Fedora 45 uses its distribution Go. Web builds use distribution Node 24, frozen lockfiles, offline dependency installation, and no dependency install scripts. Private premium themes are not fetched.
+Fedora 44 and EL 9/10 bootstrap checksum-pinned Go 1.27.3 source with their distribution compiler. Fedora 45 uses its distribution Go. Web builds use distribution Node 24 (the `nodejs:24` module on EL 9), frozen lockfiles, offline dependency installation, and no dependency install scripts. Private premium themes are not fetched.
+
+EL builds use COPR's EPEL 9/10 targets. CI also builds and tests on AlmaLinux 9/10; compatible RHEL and Rocky Linux releases share the EL packages. EL 9 preparation needs Python 3.12, not its default Python 3.9. No Go or Node runtime is needed by the installed applications.
 
 Build networking is disabled in COPR. Source/vendor/tool checksums are rechecked during `%prep`; compiler or package-manager requirement changes fail closed. Bump a recipe's `release` for packaging changes to an existing version. Review bundled licenses when updating recipes.
+
+`sfvbrr` excludes only the reviewed historical tag `0.0.4-hotfix1` from stable-release selection. Any other unexpected tag still fails closed. CLI installation tests never run real `tqm` cleanup; `sfvbrr` must accept a valid SFV fixture and reject a corrupted one.
 
 Validation does not upload duplicate SRPMs. Intermediate submission artifacts expire after one day and are deleted after successful publication.
 
@@ -40,7 +44,7 @@ uvx ruff check scripts tests
 uvx ruff format --check scripts tests
 ```
 
-For a real build, use a disposable Fedora 44 or 45 container:
+For a real build, use a disposable supported distribution container. For example:
 
 ```bash
 podman run --rm -it -v "$PWD:/work:Z" -w /work registry.fedoraproject.org/fedora:44 bash

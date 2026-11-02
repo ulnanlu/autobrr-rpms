@@ -1,5 +1,10 @@
 %global debug_package %{nil}
 %global upstream_commit @COMMIT@
+%if 0%{?fedora} == 44 || 0%{?rhel}
+%global bootstrap_go 1
+%else
+%global bootstrap_go 0
+%endif
 
 Name:           @PACKAGE@
 Version:        @VERSION@
@@ -15,12 +20,16 @@ Source4:        https://registry.npmjs.org/pnpm/-/pnpm-@PNPM_VERSION@.tgz
 Source5:        %{name}-%{version}-frontend.tar.gz
 Source6:        %{name}.service
 
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 BuildRequires:  golang >= @BOOTSTRAP_VERSION@
 %else
 BuildRequires:  golang >= @GO_VERSION@
 %endif
+%if 0%{?rhel} == 9
+BuildRequires:  nodejs >= 24
+%else
 BuildRequires:  nodejs24
+%endif
 BuildRequires:  systemd-rpm-macros
 BuildRequires:  bash
 BuildRequires:  coreutils
@@ -45,9 +54,13 @@ tar -xzf %{SOURCE1}
 tar -xzf %{SOURCE5}
 mkdir .pnpm-tool .build-bin
 tar -xzf %{SOURCE4} -C .pnpm-tool
+%if 0%{?rhel} == 9
+ln -s /usr/bin/node .build-bin/node
+%else
 ln -s /usr/bin/node-24 .build-bin/node
+%endif
 cp %{SOURCE2} source-provenance.json
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 mkdir .go-toolchain
 tar -xzf %{SOURCE3} -C .go-toolchain
 %endif
@@ -57,7 +70,7 @@ export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
 export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
 export SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@
 export CI=true PATH="$PWD/.build-bin:$PATH"
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 export GOROOT_BOOTSTRAP="$(go env GOROOT)"
 (cd .go-toolchain/go/src && ./make.bash)
 export PATH="$PWD/.go-toolchain/go/bin:$PATH"
@@ -97,7 +110,7 @@ install -Dpm0644 docs/man/autobrr.1 %{buildroot}%{_mandir}/man1/autobrr.1
 export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
 export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
 export CI=true PATH="$PWD/.build-bin:$PATH"
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 export PATH="$PWD/.go-toolchain/go/bin:$PATH"
 %endif
 %if "%{name}" == "qui"

@@ -3,6 +3,11 @@
 %global source_sha256 @SOURCE_SHA256@
 %global vendor_sha256 @VENDOR_SHA256@
 %global toolchain_sha256 @TOOLCHAIN_SHA256@
+%if 0%{?fedora} == 44 || 0%{?rhel}
+%global bootstrap_go 1
+%else
+%global bootstrap_go 0
+%endif
 
 Name:           mkbrr
 Version:        @VERSION@
@@ -15,7 +20,7 @@ Source1:        mkbrr-%{version}-vendor.tar.gz
 Source2:        mkbrr-source-provenance.json
 Source3:        https://go.dev/dl/go@TOOLCHAIN_VERSION@.src.tar.gz
 
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 # Bootstrap the newer compiler from source, never download a toolchain binary.
 BuildRequires:  golang >= @BOOTSTRAP_VERSION@
 BuildRequires:  bash
@@ -38,7 +43,7 @@ printf '%s  %s\n' '%{toolchain_sha256}' '%{SOURCE3}' | sha256sum --check --statu
 %autosetup -n mkbrr-%{upstream_commit}
 tar -xzf %{SOURCE1}
 cp %{SOURCE2} source-provenance.json
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 mkdir .go-toolchain
 tar -xzf %{SOURCE3} -C .go-toolchain
 %endif
@@ -47,7 +52,7 @@ tar -xzf %{SOURCE3} -C .go-toolchain
 export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
 export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
 export SOURCE_DATE_EPOCH=@SOURCE_DATE_EPOCH@
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 export GOROOT_BOOTSTRAP="$(go env GOROOT)"
 (cd .go-toolchain/go/src && ./make.bash)
 export PATH="$PWD/.go-toolchain/go/bin:$PATH"
@@ -66,7 +71,7 @@ install -Dpm0755 mkbrr %{buildroot}%{_bindir}/mkbrr
 %check
 export GOTOOLCHAIN=local GOPROXY=off GOSUMDB=off GOWORK=off CGO_ENABLED=0
 export GOCACHE="%{_builddir}/go-cache" GOPATH="%{_builddir}/go-path"
-%if 0%{?fedora} == 44
+%if %{bootstrap_go}
 export PATH="$PWD/.go-toolchain/go/bin:$PATH"
 %endif
 go test -mod=vendor -short ./...
