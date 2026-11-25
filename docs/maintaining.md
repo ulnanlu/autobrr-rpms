@@ -20,6 +20,8 @@ Build networking is disabled in COPR. Source/vendor/tool checksums are rechecked
 
 `sfvbrr` excludes only the reviewed historical tag `0.0.4-hotfix1` from stable-release selection. Any other unexpected tag still fails closed. CLI installation tests never run real `tqm` cleanup; `sfvbrr` must accept a valid SFV fixture and reject a corrupted one.
 
+`qui` ships a checksum-pinned module cache (`module_cache` recipe list) because its capture tests read a dependency's testdata, which vendoring strips, through `go list -m`. The cache extracts outside the source tree so `go test ./...` never walks it, and only the test subprocess runs in module mode. Upstream tests stay enabled and unmodified.
+
 Validation does not upload duplicate SRPMs. Intermediate submission artifacts expire after one day and are deleted after successful publication.
 
 ## Credentials

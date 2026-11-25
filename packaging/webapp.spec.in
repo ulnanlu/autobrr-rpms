@@ -68,7 +68,9 @@ ln -s /usr/bin/node-24 .build-bin/node
 cp %{SOURCE2} source-provenance.json
 %if "%{name}" == "qui"
 printf '%s  %s\n' '@MODULE_CACHE_SHA256@' '%{SOURCE7}' | sha256sum --check --status
-tar -xzf %{SOURCE7}
+# Outside the source tree: `go test ./...` must not walk the module cache,
+# and the bootstrap compiler may materialize fips140 inside it.
+tar -xzf %{SOURCE7} -C "%{_builddir}"
 %endif
 %if %{bootstrap_go}
 mkdir .go-toolchain
@@ -127,7 +129,7 @@ export PATH="$PWD/.go-toolchain/go/bin:$PATH"
 # Capture tests resolve the module cache with `go list -m -f {{.Dir}}`,
 # which vendor mode cannot answer. The subprocess forces module mode;
 # the test command itself keeps -mod=vendor.
-export GOMODCACHE="$PWD/go-module-cache" GOFLAGS=-mod=mod
+export GOMODCACHE="%{_builddir}/go-module-cache" GOFLAGS=-mod=mod
 # Parallel httptest server cleanup can close another test's shared HTTP connection.
 go test -mod=vendor -count=1 -short -parallel=1 ./...
 %else

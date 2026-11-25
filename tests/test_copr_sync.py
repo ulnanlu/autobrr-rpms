@@ -587,7 +587,7 @@ class FrontendTests(unittest.TestCase):
                 for value in (
                     "Source7:        %{name}-%{version}-module-cache.tar.gz",
                     "@MODULE_CACHE_SHA256@",
-                    'export GOMODCACHE="$PWD/go-module-cache" GOFLAGS=-mod=mod',
+                    'export GOMODCACHE="%{_builddir}/go-module-cache" GOFLAGS=-mod=mod',
                 ):
                     self.assertIn(value, spec)
             unit = (copr.ROOT / "packaging" / f"{package}.service").read_text()
