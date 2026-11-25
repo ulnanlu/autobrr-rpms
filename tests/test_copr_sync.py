@@ -584,10 +584,75 @@ class FrontendTests(unittest.TestCase):
                 self.assertIn(value, spec)
             if package == "qui":
                 self.assertIn("go test -mod=vendor -count=1 -short -parallel=1 ./...", spec)
+                for value in (
+                    "Source7:        %{name}-%{version}-module-cache.tar.gz",
+                    "@MODULE_CACHE_SHA256@",
+                    'export GOMODCACHE="$PWD/go-module-cache" GOFLAGS=-mod=mod',
+                ):
+                    self.assertIn(value, spec)
             unit = (copr.ROOT / "packaging" / f"{package}.service").read_text()
             self.assertIn("NoNewPrivileges=true", unit)
             self.assertNotIn("User=root", unit)
             self.assertIn(f"ExecStart=/usr/bin/{package} serve", unit)
+
+    def test_module_cache_ships_only_reviewed_module_testdata(self):
+        _, recipe = copr.settings("qui")
+        plan = {"package": "qui", "version": "1.2.3"}
+        source = Path("source")
+
+        def download(command, **kwargs):
+            cache = Path(kwargs["env"]["GOMODCACHE"])
+            module = cache / "github.com/autobrr/go-qbittorrent@v1.19.1"
+            (module / "testdata").mkdir(parents=True, exist_ok=True)
+            (module / "testdata" / "capture.json").write_text("fixture")
+            self.assertEqual(command, ["go", "mod", "download", *recipe["module_cache"]])
+            self.assertEqual(kwargs["cwd"], source)
+            for secret in ("COPR_CONFIG", "GH_TOKEN", "GITHUB_TOKEN"):
+                self.assertNotIn(secret, kwargs["env"])
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.dict(os.environ, {"GH_TOKEN": "private fixture"}),
+            patch.object(copr.subprocess, "run", side_effect=download) as run,
+        ):
+            copr.module_cache_sources(recipe, plan, source, Path(directory), Path(directory))
+            run.assert_called_once()
+            bundle = Path(directory) / "qui-1.2.3-module-cache.tar.gz"
+            repo.verify_checksum(bundle, plan["module_cache_sha256"])
+            with tarfile.open(bundle) as archive:
+                names = archive.getnames()
+                self.assertIn(
+                    "go-module-cache/github.com/autobrr/go-qbittorrent@v1.19.1"
+                    "/testdata/capture.json",
+                    names,
+                )
+        failed = types.SimpleNamespace(returncode=1, stdout="", stderr="no such module")
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(copr.subprocess, "run", return_value=failed),
+        ):
+            with self.assertRaisesRegex(repo.InvalidRepository, "go mod download failed"):
+                copr.module_cache_sources(recipe, plan, source, Path(directory), Path(directory))
+
+    def test_unreviewed_module_cache_requests_are_rejected(self):
+        config, _ = copr.settings("qui")
+        for modules in ("../escape", "github.com/autobrr/go-qbittorrent ..", ["no-slash"], [42]):
+            with patch.object(
+                Path,
+                "read_text",
+                return_value=json.dumps(
+                    {
+                        **config,
+                        "packages": {
+                            **config["packages"],
+                            "qui": {**config["packages"]["qui"], "module_cache": modules},
+                        },
+                    }
+                ),
+            ):
+                with self.assertRaisesRegex(repo.InvalidRepository, "offline module cache"):
+                    copr.settings("qui")
 
 
 class CoprStateTests(unittest.TestCase):

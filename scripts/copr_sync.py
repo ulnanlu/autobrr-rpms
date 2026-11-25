@@ -100,6 +100,18 @@ def settings(package="mkbrr"):
             re.fullmatch(r"sha512-[A-Za-z0-9+/]{86}==", frontend["integrity"]),
             "Invalid pinned pnpm integrity",
         )
+    module_cache = recipe.get("module_cache", [])
+    repo.require(
+        isinstance(module_cache, list)
+        and all(
+            isinstance(module, str)
+            and re.fullmatch(r"[A-Za-z0-9_.~/-]+", module)
+            and "/" in module
+            and ".." not in module
+            for module in module_cache
+        ),
+        "Only reviewed Go module paths may enter the offline module cache",
+    )
     return config, recipe
 
 
@@ -560,6 +572,54 @@ def toolchain_source(network, toolchain, plan, sources):
     )
 
 
+def module_cache_sources(recipe, plan, source_dir, sources, workroot):
+    """Ship reviewed modules' testdata, which vendoring strips, for upstream tests.
+
+    The qui capture tests locate go-qbittorrent through the module cache
+    (`go list -m -f {{.Dir}}`), so %check needs a real module cache offline.
+    """
+    cache = workroot / "go-module-cache"
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k
+        not in (
+            "COPR_CONFIG",
+            "RPM_SIGNING_KEY",
+            "RPM_SIGNING_PASSPHRASE",
+            "GH_TOKEN",
+            "GITHUB_TOKEN",
+            "ACTIONS_RUNTIME_TOKEN",
+        )
+    }
+    env.update(
+        {
+            "GOTOOLCHAIN": "auto",
+            "GOPROXY": "https://proxy.golang.org",
+            "GOSUMDB": "sum.golang.org",
+            "GOMODCACHE": str(cache),
+            "GOENV": "off",
+            "GOFLAGS": "",
+            "GOWORK": "off",
+        }
+    )
+    modules = recipe["module_cache"]
+    result = subprocess.run(
+        ["go", "mod", "download", *modules],
+        cwd=source_dir,
+        env=env,
+        text=True,
+        capture_output=True,
+        timeout=1200,
+        check=False,
+    )
+    repo.require(result.returncode == 0, f"go mod download failed:\n{result.stderr}")
+    bundle = sources / f"{plan['package']}-{plan['version']}-module-cache.tar.gz"
+    deterministic_tar(bundle, [cache])
+    plan["module_cache_file"] = bundle.name
+    plan["module_cache_sha256"] = repo.sha256(bundle)
+
+
 def prepare(package, output, check_copr=None, force=False, network=None):
     config, recipe = settings(package)
     network = network or repo.Network()
@@ -599,6 +659,10 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         toolchain_source(network, config["toolchain"], plan, sources)
         if recipe.get("frontend"):
             frontend_sources(network, config, recipe, plan, source_dir, sources)
+        # Inside the spec's qui-only %if blocks this placeholder stays inert.
+        plan["module_cache_sha256"] = "unused"
+        if recipe.get("module_cache"):
+            module_cache_sources(recipe, plan, source_dir, sources, Path(temporary))
         # Exclude generated application files and the Go dependency cache from the SRPM.
         shutil.rmtree(sources / "unpacked")
         provenance = sources / f"{package}-source-provenance.json"
