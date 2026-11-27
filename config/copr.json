@@ -53,8 +53,18 @@
       "binaries": ["qui"],
       "module_cache": ["github.com/autobrr/go-qbittorrent"],
       "frontend": {
-        "pnpm": "11.1.2",
-        "integrity": "sha512-QVocwll0cx51RVwUaDcb50xapft2IbUNQFbSIkUWCfEUEvI/1gLmFp8eBgRmZB95hZfhvpYaEGiINqZ7FlaUmQ=="
+        "pnpm": "12.23.0",
+        "integrity": "sha512-AtqU/68TP0YHQyKv5VL5DUC19xriWa77zNrMUIWx1hfpjWXgEx9XSLm2dEWXjuUFXX1ZpHPx7vDVBIVP781ZdQ==",
+        "pnpm_binaries": [
+          {
+            "package": "@pnpm/exe.linux-x64",
+            "integrity": "sha512-vu/N1nUJxLA0IIumbxL/rR6leGA+++SQY0XL+5KPJ1O2kyvzJoLQYL1ibLGO7TRqsZ90wclboEdhIIWvr3Qsig=="
+          },
+          {
+            "package": "@pnpm/exe.linux-arm64",
+            "integrity": "sha512-RLby8T0CIWAbljrbmjaX6S3PYhMHnLbUp+IDcOmZIY1/+wy8hJoQpjMPZlV4VJIGl8lZKUXtxJcLJ2XZ1z2SVw=="
+          }
+        ]
       }
     },
     "tqm": {

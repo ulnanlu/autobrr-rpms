@@ -8,7 +8,7 @@ Recipes: `config/copr.json` and `packaging/`. Target: `ulnanlu/autobrr-rpms` on 
 
 - Resolve upstream tags to commits and checksum their original source archives.
 - Vendor Go dependencies with checksum verification; reject changes to `go.mod`/`go.sum` or unreviewed replacements.
-- For web apps, vendor the pinned pnpm tool, both CPU architectures' dependencies, complete registry metadata, and license notices. Reject changed Node/pnpm requirements and unreviewed frontend licenses.
+- For web apps, vendor the pinned pnpm tool, both CPU architectures' dependencies, complete registry metadata, and license notices. Reject changed Node/pnpm requirements and unreviewed frontend licenses. pnpm 12 is a launcher for a native binary: its two checksum-pinned `@pnpm/exe.linux-*` packages ship in the SRPM so offline builds download nothing.
 - Build the original frontend and Go binaries offline, run upstream short tests, then test a disposable-key-signed installation and live web assets.
 - Submit SRPMs to COPR, which builds both architectures natively, signs the RPMs, and hosts binaries and sources.
 

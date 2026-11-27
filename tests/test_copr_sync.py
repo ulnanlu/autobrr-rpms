@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import copy
 import hashlib
 import io
 import json
 import os
+import shutil
 import tarfile
 import tempfile
 import types
@@ -465,9 +467,10 @@ class FrontendTests(unittest.TestCase):
         tool = io.BytesIO()
         with tarfile.open(fileobj=tool, mode="w:gz") as archive:
             content = b"MIT license fixture"
-            info = tarfile.TarInfo("package/LICENSE")
-            info.size = len(content)
-            archive.addfile(info, io.BytesIO(content))
+            for name in ("package/LICENSE", "package/bin/pnpm.cjs"):
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                archive.addfile(info, io.BytesIO(content))
         archive_bytes = tool.getvalue()
         integrity = "sha512-" + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
         recipe = {**recipe, "frontend": {**recipe["frontend"], "integrity": integrity}}
@@ -487,8 +490,28 @@ class FrontendTests(unittest.TestCase):
         sources = root / "SOURCES"
         sources.mkdir()
         network = Mock()
-        network.download.side_effect = lambda url, path, **kw: path.write_bytes(archive_bytes)
+
+        def download(url, path, **kw):
+            if url.endswith(".tgz"):
+                path.write_bytes(archive_bytes)
+            else:
+                path.write_text(
+                    json.dumps(
+                        {
+                            "name": "fixture",
+                            "versions": {"1.0.0": {}},
+                            "time": {"1.0.0": "2026-01-01"},
+                        }
+                    )
+                )
+
+        network.download.side_effect = download
         return network, config, recipe, source, sources
+
+    def with_metadata_cache(self, source):
+        cache = source / ".frontend-inputs/pnpm-cache"
+        (cache / "v11/metadata/registry.npmjs.org").mkdir(parents=True, exist_ok=True)
+        (cache / "v11/metadata/registry.npmjs.org/fixture.jsonl").write_text("fixture\n")
 
     def test_frontend_inputs_verified_and_credentials_excluded(self):
         with (
@@ -503,6 +526,7 @@ class FrontendTests(unittest.TestCase):
             ),
         ):
             network, config, recipe, source, sources = self.fixture(Path(directory))
+            self.with_metadata_cache(source)
             plan = {"package": "autobrr", "version": "1.2.3"}
             copr.frontend_sources(network, config, recipe, plan, source, sources)
             self.assertTrue(plan["frontend"])
@@ -513,6 +537,7 @@ class FrontendTests(unittest.TestCase):
                 self.assertIn("--cpu=arm64", call.args[0])
                 self.assertNotIn("COPR_CONFIG", call.kwargs["env"])
                 self.assertNotIn("GH_TOKEN", call.kwargs["env"])
+            self.assertEqual(plan["pnpm_entry"], "bin/pnpm.cjs")
             bundle = sources / "autobrr-1.2.3-frontend.tar.gz"
             repo.verify_checksum(bundle, plan["frontend_sha256"])
             with tarfile.open(bundle) as archive:
@@ -530,6 +555,7 @@ class FrontendTests(unittest.TestCase):
             ),
         ):
             network, config, recipe, source, sources = self.fixture(Path(directory), "UNLICENSED")
+            self.with_metadata_cache(source)
             with self.assertRaisesRegex(repo.InvalidRepository, "Review frontend license"):
                 copr.frontend_sources(
                     network,
@@ -564,6 +590,121 @@ class FrontendTests(unittest.TestCase):
                     )
                 run.assert_not_called()
 
+    def test_pnpm_entry_and_notices_follow_the_pinned_major_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            tool = Path(directory)
+            package = tool / "package" / "bin"
+            package.mkdir(parents=True)
+            (package / "pnpm.mjs").write_text("#!/usr/bin/env node\n")
+            self.assertEqual(copr.pnpm_entry(tool), "bin/pnpm.mjs")
+            (package / "pnpm.cjs").write_text("#!/usr/bin/env node\n")
+            self.assertEqual(copr.pnpm_entry(tool), "bin/pnpm.cjs")
+            licenses = tool / "licenses"
+            licenses.mkdir()
+            (tool / "package" / "THIRD-PARTY-NOTICES.md").write_text("bundled notices\n")
+            copr.pnpm_notices(tool, licenses)
+            self.assertEqual(
+                (licenses / "PNPM-THIRD-PARTY-NOTICES.md").read_text(), "bundled notices\n"
+            )
+            (tool / "package" / "LICENSE").write_text("MIT\n")
+            copr.pnpm_notices(tool, licenses)
+            self.assertEqual((licenses / "PNPM-LICENSE").read_text(), "MIT\n")
+            (tool / "package").chmod(0o500)
+            (package / "pnpm.cjs").unlink()
+            (package / "pnpm.mjs").unlink()
+            (tool / "package").chmod(0o700)
+            with self.assertRaisesRegex(repo.InvalidRepository, "Unsupported pinned pnpm"):
+                copr.pnpm_entry(tool)
+            for name in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+                (tool / "package" / name).unlink()
+            with self.assertRaisesRegex(repo.InvalidRepository, "no license notice"):
+                copr.pnpm_notices(tool, licenses)
+
+    def test_pnpm_native_binaries_are_pinned_placed_and_verified(self):
+        plan = {"package": "qui"}
+        entries = [
+            {"package": "@pnpm/exe.linux-x64", "integrity": None},
+            {"package": "@pnpm/exe.linux-arm64", "integrity": None},
+        ]
+        archive = io.BytesIO()
+        with tarfile.open(fileobj=archive, mode="w:gz") as bundle:
+            for name, content in (
+                ("package/pnpm", b"native fixture"),
+                ("package/LICENSE", b"MIT fixture"),
+            ):
+                info = tarfile.TarInfo(name)
+                info.size = len(content)
+                bundle.addfile(info, io.BytesIO(content))
+        archive_bytes = archive.getvalue()
+        for entry in entries:
+            entry["integrity"] = (
+                "sha512-" + base64.b64encode(hashlib.sha512(archive_bytes).digest()).decode()
+            )
+        frontend = {"pnpm": "12.23.0", "pnpm_binaries": entries}
+
+        def download(url, path, **kw):
+            require_url = url.endswith(".tgz") and "@pnpm/exe." in url
+            self.assertTrue(require_url, url)
+            path.write_bytes(archive_bytes)
+
+        network = Mock()
+        network.download.side_effect = download
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copr.pnpm_binaries(network, frontend, plan, root / "SOURCES", root / "tool")
+            for slug in ("x64", "arm64"):
+                placed = root / f"tool/package/node_modules/@pnpm/exe.linux-{slug}/pnpm"
+                self.assertTrue(placed.is_file())
+                self.assertTrue((placed.parent / "LICENSE").is_file())
+                shipped = root / f"SOURCES/qui-pnpm-linux-{slug}.tgz"
+                repo.verify_checksum(shipped, plan[f"pnpm_binary_{slug}_sha256"])
+        for kind in ("corrupt", "unsupported", "single"):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                bad_frontend = {"pnpm": "12.23.0", "pnpm_binaries": copy.deepcopy(entries)}
+                if kind == "corrupt":
+                    bad_frontend["pnpm_binaries"][0]["integrity"] = "sha512-" + "A" * 86 + "=="
+                    network.download.side_effect = lambda url, path, **kw: path.write_bytes(b"x")
+                elif kind == "unsupported":
+                    bad_frontend["pnpm_binaries"] = [
+                        {
+                            "package": "@pnpm/exe.linux-riscv64",
+                            "integrity": "sha512-" + "A" * 86 + "==",
+                        }
+                    ]
+                else:
+                    bad_frontend["pnpm_binaries"] = bad_frontend["pnpm_binaries"][:1]
+                with self.assertRaises(repo.InvalidRepository):
+                    copr.pnpm_binaries(network, bad_frontend, plan, root / "SOURCES", root / "tool")
+
+    def test_cold_metadata_completion_follows_any_pnpm_cache_version(self):
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            metadata = {
+                "name": "@scope/package",
+                "versions": {"1.0.0": {"dist": {"integrity": "fixture"}}},
+                "time": {"1.0.0": "2026-01-01"},
+            }
+            for version in ("v11", "v12"):
+                abbreviated = cache / version / "metadata/registry.npmjs.org/@scope"
+                abbreviated.mkdir(parents=True)
+                (abbreviated / "package.jsonl").write_text("fixture\n")
+            network = Mock()
+            network.download.side_effect = lambda url, path, **kw: path.write_text(
+                json.dumps(metadata)
+            )
+            copr.complete_pnpm_metadata(network, cache)
+            for version in ("v11", "v12"):
+                full = cache / version / "metadata-full/registry.npmjs.org/@scope/package.jsonl"
+                self.assertEqual(json.loads(full.read_text().splitlines()[1]), metadata)
+            network.reset_mock()
+            copr.complete_pnpm_metadata(network, cache)
+            network.download.assert_not_called()
+            shutil.rmtree(cache / "v11")
+            shutil.rmtree(cache / "v12")
+            with self.assertRaisesRegex(repo.InvalidRepository, "No pnpm metadata cache"):
+                copr.complete_pnpm_metadata(network, cache)
+
     def test_web_recipes_build_both_layers_offline_and_ship_user_services(self):
         for package in ("autobrr", "qui"):
             _, recipe = copr.settings(package)
@@ -572,6 +713,7 @@ class FrontendTests(unittest.TestCase):
                 "install --offline --frozen-lockfile --ignore-scripts",
                 "--config.cache-dir=",
                 "--dir web run build",
+                "node .pnpm-tool/package/@PNPM_ENTRY@",
                 "go build -mod=vendor",
                 "go test -mod=vendor -count=1 -short",
                 "%{_userunitdir}",

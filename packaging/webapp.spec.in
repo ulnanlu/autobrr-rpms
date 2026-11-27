@@ -23,6 +23,10 @@ Source6:        %{name}.service
 # Only qui's capture tests read a dependency module's testdata, which
 # vendoring strips; ship that module cache for the offline %check run.
 Source7:        %{name}-%{version}-module-cache.tar.gz
+# pnpm 12 is a launcher for a native binary; ship both architectures so the
+# offline build downloads nothing.
+Source8:        %{name}-pnpm-linux-x64.tgz
+Source9:        %{name}-pnpm-linux-arm64.tgz
 %endif
 
 %if %{bootstrap_go}
@@ -71,6 +75,12 @@ printf '%s  %s\n' '@MODULE_CACHE_SHA256@' '%{SOURCE7}' | sha256sum --check --sta
 # Outside the source tree: `go test ./...` must not walk the module cache,
 # and the bootstrap compiler may materialize fips140 inside it.
 tar -xzf %{SOURCE7} -C "%{_builddir}"
+printf '%s  %s\n' '@PNPM_BINARY_X64_SHA256@' '%{SOURCE8}' | sha256sum --check --status
+printf '%s  %s\n' '@PNPM_BINARY_ARM64_SHA256@' '%{SOURCE9}' | sha256sum --check --status
+mkdir -p .pnpm-tool/package/node_modules/@pnpm/exe.linux-x64
+mkdir -p .pnpm-tool/package/node_modules/@pnpm/exe.linux-arm64
+tar -xzf %{SOURCE8} -C .pnpm-tool/package/node_modules/@pnpm/exe.linux-x64 --strip-components=1
+tar -xzf %{SOURCE9} -C .pnpm-tool/package/node_modules/@pnpm/exe.linux-arm64 --strip-components=1
 %endif
 %if %{bootstrap_go}
 mkdir .go-toolchain
@@ -92,9 +102,9 @@ cp .go-toolchain/go/LICENSE GOLANG-LICENSE
 cp %{_licensedir}/golang/LICENSE GOLANG-LICENSE
 %endif
 node --version | grep -E '^v24\.'
-node .pnpm-tool/package/bin/pnpm.cjs --dir web install --offline --frozen-lockfile --ignore-scripts \
+node .pnpm-tool/package/@PNPM_ENTRY@ --dir web install --offline --frozen-lockfile --ignore-scripts \
   --store-dir "$PWD/pnpm-store" --config.cache-dir="$PWD/pnpm-cache"
-node .pnpm-tool/package/bin/pnpm.cjs --dir web run build
+node .pnpm-tool/package/@PNPM_ENTRY@ --dir web run build
 test -s web/dist/index.html
 %if "%{name}" == "qui"
 mkdir -p internal/web/dist

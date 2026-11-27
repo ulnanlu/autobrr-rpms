@@ -100,6 +100,18 @@ def settings(package="mkbrr"):
             re.fullmatch(r"sha512-[A-Za-z0-9+/]{86}==", frontend["integrity"]),
             "Invalid pinned pnpm integrity",
         )
+        binaries = frontend.get("pnpm_binaries", [])
+        repo.require(
+            isinstance(binaries, list)
+            and len(binaries) in (0, 2)
+            and all(
+                isinstance(entry, dict)
+                and entry.get("package") in ("@pnpm/exe.linux-x64", "@pnpm/exe.linux-arm64")
+                and re.fullmatch(r"sha512-[A-Za-z0-9+/]{86}==", entry.get("integrity", ""))
+                for entry in binaries
+            ),
+            "Only the two reviewed pnpm native binaries may be pinned",
+        )
     module_cache = recipe.get("module_cache", [])
     repo.require(
         isinstance(module_cache, list)
@@ -113,6 +125,54 @@ def settings(package="mkbrr"):
         "Only reviewed Go module paths may enter the offline module cache",
     )
     return config, recipe
+
+
+def pnpm_binaries(network, frontend, plan, sources, tool):
+    """Place pnpm 12's checksum-pinned native binaries next to its launcher.
+
+    The pnpm 12 npm package only launches a native binary from
+    @pnpm/exe.<platform>; shipping both architectures keeps offline builds
+    from downloading anything, and the wrapper picks the host's candidate.
+    """
+    binaries = frontend.get("pnpm_binaries", [])
+    for entry in binaries:
+        name = entry["package"]
+        slug = name.removeprefix("@pnpm/exe.linux-")
+        repo.require(
+            name in ("@pnpm/exe.linux-x64", "@pnpm/exe.linux-arm64") and slug in ("x64", "arm64"),
+            "Unsupported pinned pnpm native binary",
+        )
+        file_name = f"{plan['package']}-pnpm-linux-{slug}.tgz"
+        archive = sources / file_name
+        sources.mkdir(parents=True, exist_ok=True)
+        network.download(
+            f"https://registry.npmjs.org/{name}/-/{name.split('/')[-1]}-{frontend['pnpm']}.tgz",
+            archive,
+            limit=64 * repo.MIB,
+            hosts={"registry.npmjs.org"},
+        )
+        integrity = (
+            "sha512-" + base64.b64encode(hashlib.sha512(archive.read_bytes()).digest()).decode()
+        )
+        repo.require(integrity == entry["integrity"], f"pnpm binary integrity mismatch: {name}")
+        target = tool / "package" / "node_modules" / PurePosixPath(name)
+        target.mkdir(parents=True, exist_ok=True)
+        with tarfile.open(archive) as bundle:
+            members = [m for m in bundle.getmembers() if m.name != "package"]
+            for member in members:
+                member.name = member.name.removeprefix("package/")
+            bundle.extractall(target, members=members, filter="data")
+        repo.require((target / "pnpm").is_file(), f"Native pnpm binary missing from {name}")
+        for notice in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+            if (target / notice).is_file():
+                break
+        else:
+            raise repo.InvalidRepository(f"Native pnpm binary ships no license notice: {name}")
+        plan[f"pnpm_binary_{slug}_sha256"] = repo.sha256(archive)
+        plan[f"pnpm_binary_{slug}_file"] = file_name
+    repo.require(
+        len(binaries) in (0, 2), "pnpm 12 needs both architecture binaries to stay offline"
+    )
 
 
 def target(value):
@@ -367,15 +427,23 @@ def render_spec(recipe, plan):
 
 def complete_pnpm_metadata(network, cache):
     """Preserve full registry records for cold offline pnpm policy checks."""
-    abbreviated = cache / "v11/metadata/registry.npmjs.org"
-    full = cache / "v11/metadata-full/registry.npmjs.org"
-    missing = [
-        p.relative_to(abbreviated)
-        for p in abbreviated.rglob("*.jsonl")
-        if not (full / p.relative_to(abbreviated)).exists()
-    ]
+    # The cache layout version follows the pinned pnpm major (v11, v12, ...)
+    # and the registry directory name follows the pnpm version's convention.
+    abbreviated_roots = sorted(
+        root for root in cache.glob("v*/metadata/*") if root.is_dir() and any(root.rglob("*.jsonl"))
+    )
+    repo.require(abbreviated_roots, "No pnpm metadata cache was populated")
+    missing = []
+    for abbreviated in abbreviated_roots:
+        full = abbreviated.parent.parent / "metadata-full" / abbreviated.name
+        missing.extend(
+            (full, p.relative_to(abbreviated))
+            for p in abbreviated.rglob("*.jsonl")
+            if not (full / p.relative_to(abbreviated)).exists()
+        )
 
-    def download(relative):
+    def download(item):
+        full, relative = item
         name = str(relative).removesuffix(".jsonl")
         repo.require(
             re.fullmatch(r"(?:@[a-z0-9_.-]+/)?[a-z0-9_.-]+", name), "Unsafe npm cache name"
@@ -396,12 +464,34 @@ def complete_pnpm_metadata(network, cache):
             and isinstance(metadata.get("time"), dict),
             "Incomplete npm registry metadata",
         )
-        # pnpm 11's JSONL cache stores response headers, then the registry record.
+        # pnpm's JSONL cache stores response headers, then the registry record.
         destination.write_text("{}\n" + json.dumps(metadata, separators=(",", ":")) + "\n")
         temporary.unlink()
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         list(executor.map(download, missing))
+
+
+def pnpm_entry(tool):
+    """Resolve the pinned pnpm package's CLI entry across pnpm major layouts."""
+    for name in ("bin/pnpm.cjs", "bin/pnpm.mjs"):
+        if (tool / "package" / name).is_file():
+            return name
+    raise repo.InvalidRepository("Unsupported pinned pnpm package layout")
+
+
+def pnpm_notices(tool, licenses):
+    """Copy pnpm's own license or bundled-dependency notices, whichever it ships."""
+    copied = False
+    for name, destination in (
+        ("LICENSE", "PNPM-LICENSE"),
+        ("THIRD-PARTY-NOTICES.md", "PNPM-THIRD-PARTY-NOTICES.md"),
+    ):
+        source = tool / "package" / name
+        if source.is_file():
+            shutil.copy2(source, licenses / destination)
+            copied = True
+    repo.require(copied, "Pinned pnpm package ships no license notice")
 
 
 def frontend_node():
@@ -443,36 +533,40 @@ def frontend_sources(network, config, recipe, plan, source_dir, sources):
     tool = source_dir / ".pnpm-tool"
     with tarfile.open(pnpm) as archive:
         archive.extractall(tool, filter="data")
+    entry = pnpm_entry(tool)
+    pnpm_binaries(network, frontend, plan, sources, tool)
     inputs = source_dir / ".frontend-inputs"
-    inputs.mkdir()
+    inputs.mkdir(exist_ok=True)
     store, cache = inputs / "pnpm-store", inputs / "pnpm-cache"
-    store.mkdir()
-    cache.mkdir()
+    store.mkdir(exist_ok=True)
+    cache.mkdir(exist_ok=True)
     # No publishing credentials or host npm configuration enter dependency resolution.
     home = inputs / "home"
-    home.mkdir()
+    home.mkdir(exist_ok=True)
     env = {
         k: v
         for k, v in os.environ.items()
         if k in ("PATH", "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR")
     }
     env.update({"HOME": str(home), "CI": "true"})
-    command = [frontend_node(), str(tool / "package/bin/pnpm.cjs"), "--dir", "web"]
-    options = [
+    command = [frontend_node(), str(tool / "package" / entry), "--dir", "web"]
+    common = [
         "--frozen-lockfile",
         "--ignore-scripts",
         "--store-dir",
         str(store),
         f"--config.cache-dir={cache}",
-        "--cpu=x64",
-        "--cpu=arm64",
-        "--os=linux",
-        "--libc=glibc",
     ]
+    # pnpm 12's native fetch takes no architecture flags; install still does.
+    architecture = ["--cpu=x64", "--cpu=arm64", "--os=linux", "--libc=glibc"]
+    per_action = {
+        "fetch": [*common, *architecture] if entry.endswith(".cjs") else common,
+        "install": [*common, *architecture],
+    }
     # Install also caches metadata needed for pnpm's offline supply-chain checks.
     for action in ("fetch", "install"):
         result = subprocess.run(
-            [*command, action, *options],
+            [*command, action, *per_action[action]],
             cwd=source_dir,
             env=env,
             text=True,
@@ -490,7 +584,7 @@ def frontend_sources(network, config, recipe, plan, source_dir, sources):
     complete_pnpm_metadata(network, cache)
     licenses = inputs / "frontend-licenses"
     licenses.mkdir()
-    shutil.copy2(tool / "package/LICENSE", licenses / "PNPM-LICENSE")
+    pnpm_notices(tool, licenses)
     modules = web / "node_modules/.pnpm"
     records = {}
     for path in [
@@ -541,6 +635,7 @@ def frontend_sources(network, config, recipe, plan, source_dir, sources):
         {
             "frontend": True,
             "pnpm_version": frontend["pnpm"],
+            "pnpm_entry": entry,
             "pnpm_sha256": repo.sha256(pnpm),
             "pnpm_integrity": integrity,
             "frontend_sha256": repo.sha256(bundle),
@@ -657,10 +752,13 @@ def prepare(package, output, check_copr=None, force=False, network=None):
         plan["source_file"] = archive.name
         plan["vendor_file"] = vendor.name
         toolchain_source(network, config["toolchain"], plan, sources)
+        # Inside the spec's qui-only %if blocks these placeholders stay inert
+        # when a recipe does not ship the corresponding input.
+        plan["module_cache_sha256"] = "unused"
+        plan["pnpm_binary_x64_sha256"] = "unused"
+        plan["pnpm_binary_arm64_sha256"] = "unused"
         if recipe.get("frontend"):
             frontend_sources(network, config, recipe, plan, source_dir, sources)
-        # Inside the spec's qui-only %if blocks this placeholder stays inert.
-        plan["module_cache_sha256"] = "unused"
         if recipe.get("module_cache"):
             module_cache_sources(recipe, plan, source_dir, sources, Path(temporary))
         # Exclude generated application files and the Go dependency cache from the SRPM.
