@@ -41,6 +41,10 @@ BuildRequires:  nodejs < 1:25
 BuildRequires:  nodejs24
 %endif
 BuildRequires:  systemd-rpm-macros
+%if "%{name}" == "qui"
+# benchcompare upstream tests drive a scratch git repository.
+BuildRequires:  git
+%endif
 BuildRequires:  bash
 BuildRequires:  coreutils
 BuildRequires:  tar
